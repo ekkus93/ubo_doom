@@ -1,0 +1,9 @@
+# Example systemd drop-in (copy into something like):
+#   ~/.config/systemd/user/ubo_app.service.d/override.conf
+# then `systemctl --user daemon-reload` and restart service.
+
+[Service]
+Environment=UBO_SERVICES_PATH=%h/ubo_services
+Environment=UBO_DOOM_LIB=%h/doom/libubodoom.so
+Environment=UBO_DOOM_IWAD=%h/doom/doom2.wad
+Environment=UBO_DOOM_FPS=30

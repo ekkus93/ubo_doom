@@ -1,0 +1,1312 @@
+--- a/Makefile
++++ b/Makefile
+@@ -93,3 +93,30 @@
+ #############################################################
+ #
+ #############################################################
++
++# --------------------------------------------------------------------
++# UBO: build a shared library (no X11) for embedding into ubo_app
++# Usage:
++#   make libubodoom.so
++#
++# Produces ./libubodoom.so (in this directory).
++# Requires: libasound2-dev
++# --------------------------------------------------------------------
++
++UBO_O=$(O)/ubo
++UBO_CFLAGS=$(CFLAGS) -O2 -fPIC
++UBO_LIBS=-lasound -lm
++
++# Reuse the core object list, but swap out the X11/OSS backends.
++UBO_OBJS=$(patsubst $(O)/%,$(UBO_O)/%,$(OBJS))
++UBO_OBJS:=$(filter-out $(UBO_O)/i_sound.o $(UBO_O)/i_video.o,$(UBO_OBJS))
++UBO_OBJS+=$(UBO_O)/i_sound_alsa.o $(UBO_O)/i_video_ubo.o $(UBO_O)/doom_api.o
++
++libubodoom.so: $(UBO_OBJS)
++	$(CC) -shared -o $@ $(UBO_OBJS) $(UBO_LIBS)
++
++$(UBO_O):
++	mkdir -p $(UBO_O)
++
++$(UBO_O)/%.o: %.c | $(UBO_O)
++	$(CC) $(UBO_CFLAGS) -c $< -o $@
+--- a/d_main.c
++++ b/d_main.c
+@@ -38,6 +38,8 @@
+ #include <sys/types.h>
+ #include <sys/stat.h>
+ #include <fcntl.h>
++#include <string.h>
++#include <ctype.h>
+ #endif
+ 
+ 
+@@ -108,6 +110,7 @@
+ //extern  int	musicVolume;
+ 
+ extern  boolean	inhelpscreens;
++extern int ubo_library_mode;  // set by doom_api when embedded
+ 
+ skill_t		startskill;
+ int             startepisode;
+@@ -569,6 +572,44 @@
+     char*	doom2wad;
+ 
+     char*	doom2fwad;
++
++    // UBO embedding: allow explicit IWAD via "-iwad /path/to/doom?.wad"
++    {
++        int p = M_CheckParm ("-iwad");
++        if (p && p < myargc-1)
++        {
++            const char* iwad_path = myargv[p+1];
++            if (access(iwad_path, R_OK) != 0)
++            {
++                printf("WAD file %s not found or not readable\n", iwad_path);
++                exit(1);
++            }
++
++            // Infer game mode from filename (good enough for Doom/Ultimate Doom/Doom II)
++            {
++                const char* base = strrchr(iwad_path, '/');
++                base = base ? base + 1 : iwad_path;
++
++                // Lowercase compare without relying on strcasecmp
++                char tmp[32];
++                int i = 0;
++                while (base[i] && i < (int)sizeof(tmp)-1) { tmp[i] = (char)tolower((unsigned char)base[i]); i++; }
++                tmp[i] = 0;
++
++                if (!strncmp(tmp, "doom2", 5) || !strncmp(tmp, "plutonia", 8) || !strncmp(tmp, "tnt", 3))
++                    gamemode = commercial;
++                else if (!strncmp(tmp, "doomu", 5))
++                    gamemode = retail;
++                else if (!strncmp(tmp, "doom1", 5))
++                    gamemode = shareware;
++                else
++                    gamemode = registered;
++            }
++
++            D_AddFile ((char*)iwad_path);
++            return;
++        }
++    }
+     char*	plutoniawad;
+     char*	tntwad;
+ 
+@@ -1137,6 +1178,7 @@
+     {
+ 	singledemo = true;              // quit after one demo
+ 	G_DeferedPlayDemo (myargv[p+1]);
++	if (ubo_library_mode) return;
+ 	D_DoomLoop ();  // never returns
+     }
+ 	
+@@ -1144,6 +1186,7 @@
+     if (p && p < myargc-1)
+     {
+ 	G_TimeDemo (myargv[p+1]);
++	if (ubo_library_mode) return;
+ 	D_DoomLoop ();  // never returns
+     }
+ 	
+@@ -1167,5 +1210,6 @@
+ 
+     }
+ 
++    if (ubo_library_mode) return;
+     D_DoomLoop ();  // never returns
+ }
+--- a/doom_api.h
++++ b/doom_api.h
+@@ -0,0 +1,44 @@
++#ifndef UBO_DOOM_API_H
++#define UBO_DOOM_API_H
++
++#include <stdint.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++// When non-zero, D_DoomMain will return after initialization (instead of entering D_DoomLoop).
++extern int ubo_library_mode;
++
++// Framebuffer produced by i_video_ubo.c (320x200 RGBA8888)
++extern uint8_t ubo_rgba[320 * 200 * 4];
++
++// Minimal embedded API.
++int doom_init(const char* iwad_path);
++void doom_tick(void);
++void doom_shutdown(void);
++
++// Input (a tiny stable enum that we map to doomkeys.h internally).
++typedef enum ubo_key_e {
++    UBO_KEY_UP = 1,
++    UBO_KEY_DOWN = 2,
++    UBO_KEY_LEFT = 3,
++    UBO_KEY_RIGHT = 4,
++    UBO_KEY_FIRE = 5,     // maps to Ctrl
++    UBO_KEY_USE = 6,      // maps to Space
++    UBO_KEY_ESCAPE = 7,   // maps to Esc
++} ubo_key_t;
++
++void doom_key_down(ubo_key_t key);
++void doom_key_up(ubo_key_t key);
++
++// Accessors for ctypes.
++const uint8_t* doom_get_rgba_ptr(void);
++int doom_get_rgba_width(void);
++int doom_get_rgba_height(void);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif // UBO_DOOM_API_H
+--- a/doom_api.c
++++ b/doom_api.c
+@@ -0,0 +1,125 @@
++#include "doom_api.h"
++
++#include <stdlib.h>
++#include <string.h>
++
++#include "doomdef.h"
++#include "doomstat.h"
++#include "d_event.h"
++#include "doomkeys.h"
++#include "d_main.h"
++#include "d_net.h"
++#include "m_argv.h"
++#include "i_system.h"
++#include "i_sound.h"
++#include "i_video.h"
++#include "s_sound.h"
++
++int ubo_library_mode = 0;
++
++// Filled by i_video_ubo.c via extern.
++uint8_t ubo_rgba[320 * 200 * 4];
++
++static int g_inited = 0;
++
++// Keep argv storage alive for the lifetime of the process.
++static char* g_argv[8];
++static int g_argc = 0;
++static char g_prog[] = "ubodoom";
++
++static int map_ubo_key(ubo_key_t key)
++{
++    switch (key)
++    {
++        case UBO_KEY_UP: return KEY_UPARROW;
++        case UBO_KEY_DOWN: return KEY_DOWNARROW;
++        case UBO_KEY_LEFT: return KEY_LEFTARROW;
++        case UBO_KEY_RIGHT: return KEY_RIGHTARROW;
++        case UBO_KEY_FIRE: return KEY_RCTRL;
++        case UBO_KEY_USE: return ' ';
++        case UBO_KEY_ESCAPE: return KEY_ESCAPE;
++        default: return 0;
++    }
++}
++
++int doom_init(const char* iwad_path)
++{
++    if (g_inited) return 0;
++    if (!iwad_path) return -1;
++
++    ubo_library_mode = 1;
++
++    // Build a minimal argv: [ubodoom, -iwad, <path>]
++    g_argc = 0;
++    g_argv[g_argc++] = g_prog;
++    g_argv[g_argc++] = (char*)"-iwad";
++    g_argv[g_argc++] = strdup(iwad_path);
++
++    myargc = g_argc;
++    myargv = g_argv;
++
++    // D_DoomMain will call I_Init(), initialize sound/video, and then return (because ubo_library_mode=1).
++    D_DoomMain();
++
++    // In the original program, I_InitGraphics() is called at the start of D_DoomLoop().
++    // Our i_video_ubo backend doesn't need it, but keeping the call preserves expected init sequencing.
++    I_InitGraphics();
++
++    g_inited = 1;
++    return 0;
++}
++
++void doom_tick(void)
++{
++    if (!g_inited) return;
++
++    // One "outer loop" iteration of D_DoomLoop().
++    I_StartFrame();
++    TryRunTics();
++
++    // Position-based audio update.
++    if (players[consoleplayer].mo)
++        S_UpdateSounds(players[consoleplayer].mo);
++    else
++        S_UpdateSounds(NULL);
++
++    D_Display();
++
++#ifdef SNDINTR
++    I_UpdateSound();
++#endif
++    I_SubmitSound();
++}
++
++void doom_shutdown(void)
++{
++    if (!g_inited) return;
++
++    // Do NOT call I_Quit() (it exits the process). Just shut down sound.
++    I_ShutdownSound();
++    g_inited = 0;
++}
++
++void doom_key_down(ubo_key_t key)
++{
++    event_t ev;
++    ev.type = ev_keydown;
++    ev.data1 = map_ubo_key(key);
++    ev.data2 = 0;
++    ev.data3 = 0;
++    D_PostEvent(&ev);
++}
++
++void doom_key_up(ubo_key_t key)
++{
++    event_t ev;
++    ev.type = ev_keyup;
++    ev.data1 = map_ubo_key(key);
++    ev.data2 = 0;
++    ev.data3 = 0;
++    D_PostEvent(&ev);
++}
++
++const uint8_t* doom_get_rgba_ptr(void) { return ubo_rgba; }
++int doom_get_rgba_width(void) { return 320; }
++int doom_get_rgba_height(void) { return 200; }
+--- a/i_video_ubo.c
++++ b/i_video_ubo.c
+@@ -0,0 +1,64 @@
++#include "doom_api.h"
++
++#include <stdlib.h>
++#include <string.h>
++
++#include "doomdef.h"
++#include "i_system.h"
++#include "i_video.h"
++#include "v_video.h"
++#include "w_wad.h"
++#include "z_zone.h"
++
++// Headless video backend:
++// - No X11, no input polling here.
++// - Converts Doom's 8-bit paletted screen (screens[0]) into a 320x200 RGBA8888 buffer (ubo_rgba).
++
++static int g_inited = 0;
++static byte* g_palette = NULL;   // 256 * 3 RGB
++
++void I_InitGraphics(void)
++{
++    if (g_inited) return;
++
++    // Load PLAYPAL palette lump (first palette only).
++    g_palette = (byte*)W_CacheLumpName("PLAYPAL", PU_STATIC);
++    g_inited = 1;
++}
++
++void I_ShutdownGraphics(void)
++{
++    // Nothing to free (WAD cache owns PLAYPAL; ubo_rgba is static).
++}
++
++void I_SetPalette(byte* palette)
++{
++    // Doom will call this when palette changes (e.g., damage).
++    // The argument points to 256*3 bytes.
++    g_palette = palette;
++}
++
++void I_UpdateNoBlit(void) { }
++
++void I_StartFrame(void) { }
++void I_StartTic(void) { }
++void I_ReadScreen(byte* scr) { memcpy(scr, screens[0], SCREENWIDTH*SCREENHEIGHT); }
++
++void I_FinishUpdate(void)
++{
++    if (!g_inited) I_InitGraphics();
++    if (!g_palette) return;
++
++    // Convert 8-bit indexed pixels to RGBA (alpha=255).
++    const byte* src = screens[0];
++    uint8_t* dst = ubo_rgba;
++
++    for (int i = 0; i < SCREENWIDTH * SCREENHEIGHT; i++)
++    {
++        int idx = src[i] * 3;
++        dst[i*4 + 0] = g_palette[idx + 0];
++        dst[i*4 + 1] = g_palette[idx + 1];
++        dst[i*4 + 2] = g_palette[idx + 2];
++        dst[i*4 + 3] = 255;
++    }
++}
+--- a/i_sound_alsa.c
++++ b/i_sound_alsa.c
+@@ -0,0 +1,947 @@
++// Emacs style mode select   -*- C++ -*- 
++//-----------------------------------------------------------------------------
++//
++// $Id:$
++//
++// Copyright (C) 1993-1996 by id Software, Inc.
++//
++// This source is available for distribution and/or modification
++// only under the terms of the DOOM Source Code License as
++// published by id Software. All rights reserved.
++//
++// The source is distributed in the hope that it will be useful,
++// but WITHOUT ANY WARRANTY; without even the implied warranty of
++// FITNESS FOR A PARTICULAR PURPOSE. See the DOOM Source Code License
++// for more details.
++//
++// $Log:$
++//
++// DESCRIPTION:
++//	System interface for sound.
++//
++//-----------------------------------------------------------------------------
++
++static const char
++rcsid[] = "$Id: i_unix.c,v 1.5 1997/02/03 22:45:10 b1 Exp $";
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <stdarg.h>
++
++#include <math.h>
++
++#include <sys/time.h>
++#include <sys/types.h>
++
++#ifndef LINUX
++#include <sys/filio.h>
++#endif
++
++#include <fcntl.h>
++#include <unistd.h>
++#include <sys/ioctl.h>
++
++// Linux voxware output.
++#include <alsa/asoundlib.h>
++
++// Timer stuff. Experimental.
++#include <time.h>
++#include <signal.h>
++
++#include "z_zone.h"
++
++#include "i_system.h"
++#include "i_sound.h"
++#include "m_argv.h"
++#include "m_misc.h"
++#include "w_wad.h"
++
++#include "doomdef.h"
++
++// UNIX hack, to be removed.
++#ifdef SNDSERV
++// Separate sound server process.
++FILE*	sndserver=0;
++char*	sndserver_filename = "./sndserver ";
++#elif SNDINTR
++
++// Update all 30 millisecs, approx. 30fps synchronized.
++// Linux resolution is allegedly 10 millisecs,
++//  scale is microseconds.
++#define SOUND_INTERVAL     500
++
++// Get the interrupt. Set duration in millisecs.
++int I_SoundSetTimer( int duration_of_tick );
++void I_SoundDelTimer( void );
++#else
++// None?
++#endif
++
++
++// A quick hack to establish a protocol between
++// synchronous mix buffer updates and asynchronous
++// audio writes. Probably redundant with gametic.
++static int flag = 0;
++
++// The number of internal mixing channels,
++//  the samples calculated for each mixing step,
++//  the size of the 16bit, 2 hardware channel (stereo)
++//  mixing buffer, and the samplerate of the raw data.
++
++
++// Needed for calling the actual sound output.
++#define SAMPLECOUNT		512
++#define NUM_CHANNELS		8
++// It is 2 for 16bit, and 2 for two channels.
++#define BUFMUL                  4
++#define MIXBUFFERSIZE		(SAMPLECOUNT*BUFMUL)
++
++#define SAMPLERATE		11025	// Hz
++#define SAMPLESIZE		2   	// 16bit
++
++// The actual lengths of all sound effects.
++int 		lengths[NUMSFX];
++
++// The actual output device.
++int audio_fd;
++static snd_pcm_t* audio_pcm = NULL;
++// The global mixing buffer.
++// Basically, samples from all active internal channels
++//  are modifed and added, and stored in the buffer
++//  that is submitted to the audio device.
++signed short	mixbuffer[MIXBUFFERSIZE];
++
++
++// The channel step amount...
++unsigned int	channelstep[NUM_CHANNELS];
++// ... and a 0.16 bit remainder of last step.
++unsigned int	channelstepremainder[NUM_CHANNELS];
++
++
++// The channel data pointers, start and end.
++unsigned char*	channels[NUM_CHANNELS];
++unsigned char*	channelsend[NUM_CHANNELS];
++
++
++// Time/gametic that the channel started playing,
++//  used to determine oldest, which automatically
++//  has lowest priority.
++// In case number of active sounds exceeds
++//  available channels.
++int		channelstart[NUM_CHANNELS];
++
++// The sound in channel handles,
++//  determined on registration,
++//  might be used to unregister/stop/modify,
++//  currently unused.
++int 		channelhandles[NUM_CHANNELS];
++
++// SFX id of the playing sound effect.
++// Used to catch duplicates (like chainsaw).
++int		channelids[NUM_CHANNELS];			
++
++// Pitch to stepping lookup, unused.
++int		steptable[256];
++
++// Volume lookups.
++int		vol_lookup[128*256];
++
++// Hardware left and right channel volume lookup.
++int*		channelleftvol_lookup[NUM_CHANNELS];
++int*		channelrightvol_lookup[NUM_CHANNELS];
++
++
++
++
++//
++// Safe ioctl, convenience.
++//
++void
++myioctl
++( int	fd,
++  int	command,
++  int*	arg )
++{   
++    int		rc;
++    extern int	errno;
++    
++    rc = ioctl(fd, command, arg);  
++    if (rc < 0)
++    {
++	fprintf(stderr, "ioctl(dsp,%d,arg) failed\n", command);
++	fprintf(stderr, "errno=%d\n", errno);
++	exit(-1);
++    }
++}
++
++
++
++
++
++//
++// This function loads the sound data from the WAD lump,
++//  for single sound.
++//
++void*
++getsfx
++( char*         sfxname,
++  int*          len )
++{
++    unsigned char*      sfx;
++    unsigned char*      paddedsfx;
++    int                 i;
++    int                 size;
++    int                 paddedsize;
++    char                name[20];
++    int                 sfxlump;
++
++    
++    // Get the sound data from the WAD, allocate lump
++    //  in zone memory.
++    sprintf(name, "ds%s", sfxname);
++
++    // Now, there is a severe problem with the
++    //  sound handling, in it is not (yet/anymore)
++    //  gamemode aware. That means, sounds from
++    //  DOOM II will be requested even with DOOM
++    //  shareware.
++    // The sound list is wired into sounds.c,
++    //  which sets the external variable.
++    // I do not do runtime patches to that
++    //  variable. Instead, we will use a
++    //  default sound for replacement.
++    if ( W_CheckNumForName(name) == -1 )
++      sfxlump = W_GetNumForName("dspistol");
++    else
++      sfxlump = W_GetNumForName(name);
++    
++    size = W_LumpLength( sfxlump );
++
++    // Debug.
++    // fprintf( stderr, "." );
++    //fprintf( stderr, " -loading  %s (lump %d, %d bytes)\n",
++    //	     sfxname, sfxlump, size );
++    //fflush( stderr );
++    
++    sfx = (unsigned char*)W_CacheLumpNum( sfxlump, PU_STATIC );
++
++    // Pads the sound effect out to the mixing buffer size.
++    // The original realloc would interfere with zone memory.
++    paddedsize = ((size-8 + (SAMPLECOUNT-1)) / SAMPLECOUNT) * SAMPLECOUNT;
++
++    // Allocate from zone memory.
++    paddedsfx = (unsigned char*)Z_Malloc( paddedsize+8, PU_STATIC, 0 );
++    // ddt: (unsigned char *) realloc(sfx, paddedsize+8);
++    // This should interfere with zone memory handling,
++    //  which does not kick in in the soundserver.
++
++    // Now copy and pad.
++    memcpy(  paddedsfx, sfx, size );
++    for (i=size ; i<paddedsize+8 ; i++)
++        paddedsfx[i] = 128;
++
++    // Remove the cached lump.
++    Z_Free( sfx );
++    
++    // Preserve padded length.
++    *len = paddedsize;
++
++    // Return allocated padded data.
++    return (void *) (paddedsfx + 8);
++}
++
++
++
++
++
++//
++// This function adds a sound to the
++//  list of currently active sounds,
++//  which is maintained as a given number
++//  (eight, usually) of internal channels.
++// Returns a handle.
++//
++int
++addsfx
++( int		sfxid,
++  int		volume,
++  int		step,
++  int		seperation )
++{
++    static unsigned short	handlenums = 0;
++ 
++    int		i;
++    int		rc = -1;
++    
++    int		oldest = gametic;
++    int		oldestnum = 0;
++    int		slot;
++
++    int		rightvol;
++    int		leftvol;
++
++    // Chainsaw troubles.
++    // Play these sound effects only one at a time.
++    if ( sfxid == sfx_sawup
++	 || sfxid == sfx_sawidl
++	 || sfxid == sfx_sawful
++	 || sfxid == sfx_sawhit
++	 || sfxid == sfx_stnmov
++	 || sfxid == sfx_pistol	 )
++    {
++	// Loop all channels, check.
++	for (i=0 ; i<NUM_CHANNELS ; i++)
++	{
++	    // Active, and using the same SFX?
++	    if ( (channels[i])
++		 && (channelids[i] == sfxid) )
++	    {
++		// Reset.
++		channels[i] = 0;
++		// We are sure that iff,
++		//  there will only be one.
++		break;
++	    }
++	}
++    }
++
++    // Loop all channels to find oldest SFX.
++    for (i=0; (i<NUM_CHANNELS) && (channels[i]); i++)
++    {
++	if (channelstart[i] < oldest)
++	{
++	    oldestnum = i;
++	    oldest = channelstart[i];
++	}
++    }
++
++    // Tales from the cryptic.
++    // If we found a channel, fine.
++    // If not, we simply overwrite the first one, 0.
++    // Probably only happens at startup.
++    if (i == NUM_CHANNELS)
++	slot = oldestnum;
++    else
++	slot = i;
++
++    // Okay, in the less recent channel,
++    //  we will handle the new SFX.
++    // Set pointer to raw data.
++    channels[slot] = (unsigned char *) S_sfx[sfxid].data;
++    // Set pointer to end of raw data.
++    channelsend[slot] = channels[slot] + lengths[sfxid];
++
++    // Reset current handle number, limited to 0..100.
++    if (!handlenums)
++	handlenums = 100;
++
++    // Assign current handle number.
++    // Preserved so sounds could be stopped (unused).
++    channelhandles[slot] = rc = handlenums++;
++
++    // Set stepping???
++    // Kinda getting the impression this is never used.
++    channelstep[slot] = step;
++    // ???
++    channelstepremainder[slot] = 0;
++    // Should be gametic, I presume.
++    channelstart[slot] = gametic;
++
++    // Separation, that is, orientation/stereo.
++    //  range is: 1 - 256
++    seperation += 1;
++
++    // Per left/right channel.
++    //  x^2 seperation,
++    //  adjust volume properly.
++    leftvol =
++	volume - ((volume*seperation*seperation) >> 16); ///(256*256);
++    seperation = seperation - 257;
++    rightvol =
++	volume - ((volume*seperation*seperation) >> 16);	
++
++    // Sanity check, clamp volume.
++    if (rightvol < 0 || rightvol > 127)
++	I_Error("rightvol out of bounds");
++    
++    if (leftvol < 0 || leftvol > 127)
++	I_Error("leftvol out of bounds");
++    
++    // Get the proper lookup table piece
++    //  for this volume level???
++    channelleftvol_lookup[slot] = &vol_lookup[leftvol*256];
++    channelrightvol_lookup[slot] = &vol_lookup[rightvol*256];
++
++    // Preserve sound SFX id,
++    //  e.g. for avoiding duplicates of chainsaw.
++    channelids[slot] = sfxid;
++
++    // You tell me.
++    return rc;
++}
++
++
++
++
++
++//
++// SFX API
++// Note: this was called by S_Init.
++// However, whatever they did in the
++// old DPMS based DOS version, this
++// were simply dummies in the Linux
++// version.
++// See soundserver initdata().
++//
++void I_SetChannels()
++{
++  // Init internal lookups (raw data, mixing buffer, channels).
++  // This function sets up internal lookups used during
++  //  the mixing process. 
++  int		i;
++  int		j;
++    
++  int*	steptablemid = steptable + 128;
++  
++  // Okay, reset internal mixing channels to zero.
++  /*for (i=0; i<NUM_CHANNELS; i++)
++  {
++    channels[i] = 0;
++  }*/
++
++  // This table provides step widths for pitch parameters.
++  // I fail to see that this is currently used.
++  for (i=-128 ; i<128 ; i++)
++    steptablemid[i] = (int)(pow(2.0, (i/64.0))*65536.0);
++  
++  
++  // Generates volume lookup tables
++  //  which also turn the unsigned samples
++  //  into signed samples.
++  for (i=0 ; i<128 ; i++)
++    for (j=0 ; j<256 ; j++)
++      vol_lookup[i*256+j] = (i*(j-128)*256)/127;
++}	
++
++ 
++void I_SetSfxVolume(int volume)
++{
++  // Identical to DOS.
++  // Basically, this should propagate
++  //  the menu/config file setting
++  //  to the state variable used in
++  //  the mixing.
++  snd_SfxVolume = volume;
++}
++
++// MUSIC API - dummy. Some code from DOS version.
++void I_SetMusicVolume(int volume)
++{
++  // Internal state variable.
++  snd_MusicVolume = volume;
++  // Now set volume on output device.
++  // Whatever( snd_MusciVolume );
++}
++
++
++//
++// Retrieve the raw data lump index
++//  for a given SFX name.
++//
++int I_GetSfxLumpNum(sfxinfo_t* sfx)
++{
++    char namebuf[9];
++    sprintf(namebuf, "ds%s", sfx->name);
++    return W_GetNumForName(namebuf);
++}
++
++//
++// Starting a sound means adding it
++//  to the current list of active sounds
++//  in the internal channels.
++// As the SFX info struct contains
++//  e.g. a pointer to the raw data,
++//  it is ignored.
++// As our sound handling does not handle
++//  priority, it is ignored.
++// Pitching (that is, increased speed of playback)
++//  is set, but currently not used by mixing.
++//
++int
++I_StartSound
++( int		id,
++  int		vol,
++  int		sep,
++  int		pitch,
++  int		priority )
++{
++
++  // UNUSED
++  priority = 0;
++  
++#ifdef SNDSERV 
++    if (sndserver)
++    {
++	fprintf(sndserver, "p%2.2x%2.2x%2.2x%2.2x\n", id, pitch, vol, sep);
++	fflush(sndserver);
++    }
++    // warning: control reaches end of non-void function.
++    return id;
++#else
++    // Debug.
++    //fprintf( stderr, "starting sound %d", id );
++    
++    // Returns a handle (not used).
++    id = addsfx( id, vol, steptable[pitch], sep );
++
++    // fprintf( stderr, "/handle is %d\n", id );
++    
++    return id;
++#endif
++}
++
++
++
++void I_StopSound (int handle)
++{
++  // You need the handle returned by StartSound.
++  // Would be looping all channels,
++  //  tracking down the handle,
++  //  an setting the channel to zero.
++  
++  // UNUSED.
++  handle = 0;
++}
++
++
++int I_SoundIsPlaying(int handle)
++{
++    // Ouch.
++    return gametic < handle;
++}
++
++
++
++
++//
++// This function loops all active (internal) sound
++//  channels, retrieves a given number of samples
++//  from the raw sound data, modifies it according
++//  to the current (internal) channel parameters,
++//  mixes the per channel samples into the global
++//  mixbuffer, clamping it to the allowed range,
++//  and sets up everything for transferring the
++//  contents of the mixbuffer to the (two)
++//  hardware channels (left and right, that is).
++//
++// This function currently supports only 16bit.
++//
++void I_UpdateSound( void )
++{
++#ifdef SNDINTR
++  // Debug. Count buffer misses with interrupt.
++  static int misses = 0;
++#endif
++
++  
++  // Mix current sound data.
++  // Data, from raw sound, for right and left.
++  register unsigned int	sample;
++  register int		dl;
++  register int		dr;
++  
++  // Pointers in global mixbuffer, left, right, end.
++  signed short*		leftout;
++  signed short*		rightout;
++  signed short*		leftend;
++  // Step in mixbuffer, left and right, thus two.
++  int				step;
++
++  // Mixing channel index.
++  int				chan;
++    
++    // Left and right channel
++    //  are in global mixbuffer, alternating.
++    leftout = mixbuffer;
++    rightout = mixbuffer+1;
++    step = 2;
++
++    // Determine end, for left channel only
++    //  (right channel is implicit).
++    leftend = mixbuffer + SAMPLECOUNT*step;
++
++    // Mix sounds into the mixing buffer.
++    // Loop over step*SAMPLECOUNT,
++    //  that is 512 values for two channels.
++    while (leftout != leftend)
++    {
++	// Reset left/right value. 
++	dl = 0;
++	dr = 0;
++
++	// Love thy L2 chache - made this a loop.
++	// Now more channels could be set at compile time
++	//  as well. Thus loop those  channels.
++	for ( chan = 0; chan < NUM_CHANNELS; chan++ )
++	{
++	    // Check channel, if active.
++	    if (channels[ chan ])
++	    {
++		// Get the raw data from the channel. 
++		sample = *channels[ chan ];
++		// Add left and right part
++		//  for this channel (sound)
++		//  to the current data.
++		// Adjust volume accordingly.
++		dl += channelleftvol_lookup[ chan ][sample];
++		dr += channelrightvol_lookup[ chan ][sample];
++		// Increment index ???
++		channelstepremainder[ chan ] += channelstep[ chan ];
++		// MSB is next sample???
++		channels[ chan ] += channelstepremainder[ chan ] >> 16;
++		// Limit to LSB???
++		channelstepremainder[ chan ] &= 65536-1;
++
++		// Check whether we are done.
++		if (channels[ chan ] >= channelsend[ chan ])
++		    channels[ chan ] = 0;
++	    }
++	}
++	
++	// Clamp to range. Left hardware channel.
++	// Has been char instead of short.
++	// if (dl > 127) *leftout = 127;
++	// else if (dl < -128) *leftout = -128;
++	// else *leftout = dl;
++
++	if (dl > 0x7fff)
++	    *leftout = 0x7fff;
++	else if (dl < -0x8000)
++	    *leftout = -0x8000;
++	else
++	    *leftout = dl;
++
++	// Same for right hardware channel.
++	if (dr > 0x7fff)
++	    *rightout = 0x7fff;
++	else if (dr < -0x8000)
++	    *rightout = -0x8000;
++	else
++	    *rightout = dr;
++
++	// Increment current pointers in mixbuffer.
++	leftout += step;
++	rightout += step;
++    }
++
++#ifdef SNDINTR
++    // Debug check.
++    if ( flag )
++    {
++      misses += flag;
++      flag = 0;
++    }
++    
++    if ( misses > 10 )
++    {
++      fprintf( stderr, "I_SoundUpdate: missed 10 buffer writes\n");
++      misses = 0;
++    }
++    
++    // Increment flag for update.
++    flag++;
++#endif
++}
++
++
++// 
++// This would be used to write out the mixbuffer
++//  during each game loop update.
++// Updates sound buffer and audio device at runtime. 
++// It is called during Timer interrupt with SNDINTR.
++// Mixing now done synchronous, and
++//  only output be done asynchronous?
++//
++void
++I_SubmitSound(void)
++{
++#ifdef SNDSERV
++  // Write to sound server.
++  write(audio_fd, mixbuffer, SAMPLECOUNT*BUFMUL);
++#else
++  if (!audio_pcm) return;
++
++  // SAMPLECOUNT is "frames" (each frame = stereo sample = 4 bytes)
++  snd_pcm_sframes_t frames = snd_pcm_writei(audio_pcm, mixbuffer, SAMPLECOUNT);
++  if (frames < 0)
++  {
++    // Try to recover from underruns, etc.
++    frames = snd_pcm_recover(audio_pcm, (int)frames, 1);
++  }
++#endif
++}
++
++
++
++
++void
++I_UpdateSoundParams
++( int	handle,
++  int	vol,
++  int	sep,
++  int	pitch)
++{
++  // I fail too see that this is used.
++  // Would be using the handle to identify
++  //  on which channel the sound might be active,
++  //  and resetting the channel parameters.
++
++  // UNUSED.
++  handle = vol = sep = pitch = 0;
++}
++
++
++
++
++void
++I_ShutdownSound(void)
++{
++#ifdef SNDSERV
++  close (audio_fd);
++#else
++  if (audio_pcm)
++  {
++    snd_pcm_drain(audio_pcm);
++    snd_pcm_close(audio_pcm);
++    audio_pcm = NULL;
++  }
++#endif
++}
++
++
++
++
++
++
++
++void
++I_InitSound()
++{ 
++#ifdef SNDSERV
++  char buffer[256];
++
++  if (getenv("DOOMWADDIR"))
++    sprintf(buffer, "%s/%s", getenv("DOOMWADDIR"), sndserver_filename);
++  else
++    sprintf(buffer, "%s", sndserver_filename);
++
++  if (access(buffer, X_OK))
++  {
++    fprintf(stderr, "Could not find sound server [%s]\n", buffer);
++    exit(-1);
++  }
++  // start sound process
++  if (0==fork())
++  {
++    execl(buffer, sndserver_filename, NULL);
++    fprintf(stderr, "Could not start sound server [%s]\n", buffer);
++    exit(-1);
++  }
++  // init sound server
++  if (0>(audio_fd = open("/dev/ttyp0", O_RDWR)))
++  {
++    fprintf(stderr, "Could not open /dev/ttyp0\n");
++    exit(-1);
++  }
++#else
++  // ALSA output (16-bit stereo @ 11025 Hz, interleaved)
++  int err;
++  if (audio_pcm) return;
++
++  err = snd_pcm_open(&audio_pcm, "default", SND_PCM_STREAM_PLAYBACK, 0);
++  if (err < 0)
++  {
++    fprintf(stderr, "ALSA: snd_pcm_open failed: %s\n", snd_strerror(err));
++    audio_pcm = NULL;
++    return;
++  }
++
++  err = snd_pcm_set_params(
++      audio_pcm,
++      SND_PCM_FORMAT_S16_LE,
++      SND_PCM_ACCESS_RW_INTERLEAVED,
++      2,          // channels
++      11025,      // rate
++      1,          // soft_resample
++      500000      // latency in us
++  );
++  if (err < 0)
++  {
++    fprintf(stderr, "ALSA: snd_pcm_set_params failed: %s\n", snd_strerror(err));
++    snd_pcm_close(audio_pcm);
++    audio_pcm = NULL;
++    return;
++  }
++#endif
++}
++
++
++
++
++
++//
++// MUSIC API.
++// Still no music done.
++// Remains. Dummies.
++//
++void I_InitMusic(void)		{ }
++void I_ShutdownMusic(void)	{ }
++
++static int	looping=0;
++static int	musicdies=-1;
++
++void I_PlaySong(int handle, int looping)
++{
++  // UNUSED.
++  handle = looping = 0;
++  musicdies = gametic + TICRATE*30;
++}
++
++void I_PauseSong (int handle)
++{
++  // UNUSED.
++  handle = 0;
++}
++
++void I_ResumeSong (int handle)
++{
++  // UNUSED.
++  handle = 0;
++}
++
++void I_StopSong(int handle)
++{
++  // UNUSED.
++  handle = 0;
++  
++  looping = 0;
++  musicdies = 0;
++}
++
++void I_UnRegisterSong(int handle)
++{
++  // UNUSED.
++  handle = 0;
++}
++
++int I_RegisterSong(void* data)
++{
++  // UNUSED.
++  data = NULL;
++  
++  return 1;
++}
++
++// Is the song playing?
++int I_QrySongPlaying(int handle)
++{
++  // UNUSED.
++  handle = 0;
++  return looping || musicdies > gametic;
++}
++
++
++
++//
++// Experimental stuff.
++// A Linux timer interrupt, for asynchronous
++//  sound output.
++// I ripped this out of the Timer class in
++//  our Difference Engine, including a few
++//  SUN remains...
++//  
++#ifdef sun
++    typedef     sigset_t        tSigSet;
++#else    
++    typedef     int             tSigSet;
++#endif
++
++
++// We might use SIGVTALRM and ITIMER_VIRTUAL, if the process
++//  time independend timer happens to get lost due to heavy load.
++// SIGALRM and ITIMER_REAL doesn't really work well.
++// There are issues with profiling as well.
++static int /*__itimer_which*/  itimer = ITIMER_REAL;
++
++static int sig = SIGALRM;
++
++// Interrupt handler.
++void I_HandleSoundTimer( int ignore )
++{
++  // Debug.
++  //fprintf( stderr, "%c", '+' ); fflush( stderr );
++  
++  // Feed sound device if necesary.
++  if ( flag )
++  {
++    // See I_SubmitSound().
++    // Write it to DSP device.
++    write(audio_fd, mixbuffer, SAMPLECOUNT*BUFMUL);
++
++    // Reset flag counter.
++    flag = 0;
++  }
++  else
++    return;
++  
++  // UNUSED, but required.
++  ignore = 0;
++  return;
++}
++
++// Get the interrupt. Set duration in millisecs.
++int I_SoundSetTimer( int duration_of_tick )
++{
++  // Needed for gametick clockwork.
++  struct itimerval    value;
++  struct itimerval    ovalue;
++  struct sigaction    act;
++  struct sigaction    oact;
++
++  int res;
++  
++  // This sets to SA_ONESHOT and SA_NOMASK, thus we can not use it.
++  //     signal( _sig, handle_SIG_TICK );
++  
++  // Now we have to change this attribute for repeated calls.
++  act.sa_handler = I_HandleSoundTimer;
++#ifndef sun    
++  //ac	t.sa_mask = _sig;
++#endif
++  act.sa_flags = SA_RESTART;
++  
++  sigaction( sig, &act, &oact );
++
++  value.it_interval.tv_sec    = 0;
++  value.it_interval.tv_usec   = duration_of_tick;
++  value.it_value.tv_sec       = 0;
++  value.it_value.tv_usec      = duration_of_tick;
++
++  // Error is -1.
++  res = setitimer( itimer, &value, &ovalue );
++
++  // Debug.
++  if ( res == -1 )
++    fprintf( stderr, "I_SoundSetTimer: interrupt n.a.\n");
++  
++  return res;
++}
++
++
++// Remove the interrupt. Set duration to zero.
++void I_SoundDelTimer()
++{
++  // Debug.
++  if ( I_SoundSetTimer( 0 ) == -1)
++    fprintf( stderr, "I_SoundDelTimer: failed to remove interrupt. Doh!\n");
++}

@@ -1,0 +1,22 @@
+# Build outputs
+native/build/
+native/out/
+**/*.o
+**/*.so
+
+# Python
+**/__pycache__/
+**/*.pyc
+
+# Local env
+.env
+*.env.local
+
+# Editor
+.vscode/
+.idea/
+
+# WADs / assets that should not be committed
+*.wad
+
+docs/chatgpt/

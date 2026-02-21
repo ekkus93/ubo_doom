@@ -249,6 +249,7 @@ def init_service() -> None:
         RegisterRegularAppAction(
             key="doom",
             menu_item=UboApplicationItem(
+                application_id="doom",
                 label="Doom",
                 icon="󰺵",
                 application=DoomPage,

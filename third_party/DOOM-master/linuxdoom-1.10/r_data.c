@@ -537,9 +537,13 @@ void R_InitTextures (void)
 
 	for (j=0 ; j<texture->patchcount ; j++, mpatch++, patch++)
 	{
+	    int pnum;
 	    patch->originx = SHORT(mpatch->originx);
 	    patch->originy = SHORT(mpatch->originy);
-	    patch->patch = patchlookup[SHORT(mpatch->patch)];
+	    pnum = SHORT(mpatch->patch);
+	    /* Bounds-check pnum before indexing patchlookup (stack alloca buffer).
+	     * Out-of-range patch indices in the WAD cause a SEGV in vanilla DOOM. */
+	    patch->patch = (pnum >= 0 && pnum < nummappatches) ? patchlookup[pnum] : -1;
 	    if (patch->patch == -1)
 	    {
 		I_Error ("R_InitTextures: Missing patch in texture %s",

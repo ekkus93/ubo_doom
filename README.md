@@ -24,7 +24,7 @@ Video is rendered **240×240 letterboxed** to preserve Doom’s aspect ratio; au
 
 ## Requirements
 
-- `gcc`, `make`
+- `build-essential` (gcc, make, etc.)
 - ALSA dev headers: `libasound2-dev`
 - `ubo_app` installed and runnable
 - External services enabled via `UBO_SERVICES_PATH`
@@ -44,7 +44,7 @@ cd ~/work/ubo_doom
 ### 2) Install build dependencies
 
 ```bash
-sudo apt install gcc make libasound2-dev
+sudo apt install build-essential libasound2-dev
 ```
 
 ### 3) Build the shared library

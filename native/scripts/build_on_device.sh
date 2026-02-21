@@ -73,7 +73,9 @@ rsync -av --delete "${DOOM_SRC}/" "${REMOTE}:${REMOTE_BUILD_DIR}/"
 # ── 3. Build ────────────────────────────────────────────────────────────────────
 echo ""
 echo "==> Building libubodoom.so on ${REMOTE} ..."
-ssh "${REMOTE}" "cd '${REMOTE_BUILD_DIR}' && make libubodoom.so"
+# Remove stale object files (e.g. from a previous x86_64 build on developer host)
+# before building natively on the device.
+ssh "${REMOTE}" "cd '${REMOTE_BUILD_DIR}' && rm -rf linux/ && make libubodoom.so"
 
 # ── 4. Install .so ──────────────────────────────────────────────────────────────
 echo ""

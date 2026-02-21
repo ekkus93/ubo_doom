@@ -189,6 +189,9 @@ class DoomPage(UboPageWidget):
             Clock.schedule_once(lambda _dt: self._start_tick(), 0)
         except Exception:
             print("[doom] DoomPage._init_doom FAILED:\n" + traceback.format_exc(), flush=True)
+            # Reverse the eager pause/mute so ubo_app resumes normally.
+            store.dispatch(AudioSetMuteStatusAction(is_mute=False, device=AudioDevice.OUTPUT))
+            store.dispatch(DisplayResumeAction())
 
     def _start_tick(self) -> None:
         if self._evt is None:

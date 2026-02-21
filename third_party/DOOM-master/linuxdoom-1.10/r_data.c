@@ -28,6 +28,7 @@ static const char
 rcsid[] = "$Id: r_data.c,v 1.4 1997/02/03 16:47:55 b1 Exp $";
 
 #include <stdint.h>
+#include <stdlib.h>
 #include "i_system.h"
 #include "z_zone.h"
 
@@ -256,9 +257,27 @@ void R_GenerateComposite (int texnum)
 	 i<texture->patchcount;
 	 i++, patch++)
     {
+	int pw;
+	int col;
+
+	/* Skip patches flagged missing/invalid (any negative lump number). */
+	if (patch->patch < 0)
+	    continue;
 	realpatch = W_CacheLumpNum (patch->patch, PU_CACHE);
+	pw = (int)(short)SHORT(realpatch->width);
+	if (pw <= 0)
+	    continue;
+	/* Clamp pw to the actual lump byte length (same guard as R_GenerateLookup). */
+	{
+	    int lump_len = W_LumpLength(patch->patch);
+	    int max_cols = (lump_len >= 8) ? (lump_len - 8) / 4 : 0;
+	    if (pw > max_cols)
+		pw = max_cols;
+	}
+	if (pw <= 0)
+	    continue;
 	x1 = patch->originx;
-	x2 = x1 + SHORT(realpatch->width);
+	x2 = x1 + pw;
 
 	if (x1<0)
 	    x = 0;
@@ -273,9 +292,12 @@ void R_GenerateComposite (int texnum)
 	    // Column does not have multiple patches?
 	    if (collump[x] >= 0)
 		continue;
-	    
+
+	    col = x - x1;
+	    if (col < 0 || col >= pw)
+		continue;
 	    patchcol = (column_t *)((byte *)realpatch
-				    + LONG(realpatch->columnofs[x-x1]));
+				    + LONG(realpatch->columnofs[col]));
 	    R_DrawColumnInCache (patchcol,
 				 block + colofs[x],
 				 patch->originy,
@@ -309,6 +331,15 @@ void R_GenerateLookup (int texnum)
 	
     texture = textures[texnum];
 
+    /* Guard: a zero/negative width texture can't be rendered and would cause
+     * alloca(huge) or alloca(0) which is undefined / crashes. */
+    if (texture->width <= 0)
+    {
+	fprintf(stderr, "R_GenerateLookup: texture %.8s has bad width %d - skipping\n",
+		texture->name, texture->width);
+	return;
+    }
+
     // Composited texture not created yet.
     texturecomposite[texnum] = 0;
     
@@ -320,7 +351,15 @@ void R_GenerateLookup (int texnum)
     //  that are covered by more than one patch.
     // Fill in the lump / offset, so columns
     //  with only a single patch are all done.
-    patchcount = (byte *)alloca (texture->width);
+    /* Use malloc instead of alloca: large/negative texture->width would
+     * overflow the thread stack and SEGV. */
+    patchcount = (byte *)malloc (texture->width);
+    if (!patchcount)
+    {
+	fprintf(stderr, "R_GenerateLookup: out of memory for texture %.8s\n",
+		texture->name);
+	return;
+    }
     memset (patchcount, 0, texture->width);
     patch = texture->patches;
 		
@@ -328,9 +367,38 @@ void R_GenerateLookup (int texnum)
 	 i<texture->patchcount;
 	 i++, patch++)
     {
+	int pw;
+
+	/* Skip patches that were flagged missing/invalid in R_InitTextures
+	 * (patch == -1), or any other invalid lump number. */
+	if (patch->patch < 0)
+	    continue;
 	realpatch = W_CacheLumpNum (patch->patch, PU_CACHE);
-	x1 = patch->originx;
-	x2 = x1 + SHORT(realpatch->width);
+	pw = (int)(short)SHORT(realpatch->width);
+	if (pw <= 0)
+	{
+	    fprintf(stderr, "R_GenerateLookup: patch lump %d has bad width %d"
+		    " in texture %.8s - skipping\n",
+		    patch->patch, pw, texture->name);
+	    continue;
+	}	/* Clamp pw to the actual lump byte length so we never read past the end
+	 * of the patch_t::columnofs[] array.  Each entry is 4 bytes; the fixed
+	 * header is 4 shorts (8 bytes). */
+	{
+	    int lump_len = W_LumpLength(patch->patch);
+	    int max_cols = (lump_len >= 8) ? (lump_len - 8) / 4 : 0;
+	    if (pw > max_cols)
+	    {
+		fprintf(stderr, "R_GenerateLookup: patch lump %d claims width %d"
+			" but lump is only %d bytes (max %d cols)"
+			" in texture %.8s - clamping\n",
+			patch->patch, pw, lump_len, max_cols, texture->name);
+		pw = max_cols;
+	    }
+	}
+	if (pw <= 0)
+	    continue;	x1 = patch->originx;
+	x2 = x1 + pw;
 	
 	if (x1 < 0)
 	    x = 0;
@@ -341,9 +409,13 @@ void R_GenerateLookup (int texnum)
 	    x2 = texture->width;
 	for ( ; x<x2 ; x++)
 	{
+	    int col = x - x1;
+	    /* col must be in [0, pw) to safely index realpatch->columnofs. */
+	    if (col < 0 || col >= pw)
+		continue;
 	    patchcount[x]++;
 	    collump[x] = patch->patch;
-	    colofs[x] = LONG(realpatch->columnofs[x-x1])+3;
+	    colofs[x] = LONG(realpatch->columnofs[col])+3;
 	}
     }
 	
@@ -353,6 +425,7 @@ void R_GenerateLookup (int texnum)
 	{
 	    printf ("R_GenerateLookup: column without a patch (%s)\n",
 		    texture->name);
+	    free(patchcount);
 	    return;
 	}
 	// I_Error ("R_GenerateLookup: column without a patch");
@@ -371,7 +444,8 @@ void R_GenerateLookup (int texnum)
 	    
 	    texturecompositesize[texnum] += texture->height;
 	}
-    }	
+    }
+    free(patchcount);
 }
 
 
@@ -449,12 +523,31 @@ void R_InitTextures (void)
     names = W_CacheLumpName ("PNAMES", PU_STATIC);
     nummappatches = LONG ( *((int *)names) );
     name_p = names+4;
-    patchlookup = alloca (nummappatches*sizeof(*patchlookup));
+    /* Use malloc instead of alloca: a large nummappatches from the WAD could
+     * overflow the thread stack and corrupt the setjmp buffer in doom_init. */
+    if (nummappatches <= 0)
+    {
+	fprintf(stderr, "R_InitTextures: PNAMES lump has %d entries\n",
+		nummappatches);
+	nummappatches = 0;
+    }
+    patchlookup = nummappatches > 0
+	? malloc (nummappatches*sizeof(*patchlookup))
+	: NULL;
+    if (nummappatches > 0 && !patchlookup)
+	I_Error ("R_InitTextures: out of memory for patchlookup (%d entries)",
+		 nummappatches);
     
     for (i=0 ; i<nummappatches ; i++)
     {
 	strncpy (name,name_p+i*8, 8);
 	patchlookup[i] = W_CheckNumForName (name);
+    }
+    {
+	int found = 0;
+	for (i=0; i<nummappatches; i++) found += (patchlookup[i] >= 0);
+	fprintf(stderr, "[doom] R_InitTextures: nummappatches=%d found=%d/%d\n",
+		nummappatches, found, nummappatches);
     }
     Z_Free (names);
     
@@ -522,14 +615,29 @@ void R_InitTextures (void)
 	
 	mtexture = (maptexture_t *) ( (byte *)maptex + offset);
 
-	texture = textures[i] =
-	    Z_Malloc (sizeof(texture_t)
-		      + sizeof(texpatch_t)*(SHORT(mtexture->patchcount)-1),
-		      PU_STATIC, 0);
-	
+	/* Read patchcount before the Z_Malloc so we can guard against
+	 * a zero or negative value.  A bad patchcount causes the naive
+	 * (patchcount-1) expression to produce a huge size_t value when
+	 * cast to unsigned, which corrupts the zone allocator and SIGSEGVs
+	 * before I_Error can fire. */
+	{
+	    int pc = (int)(short)SHORT(mtexture->patchcount);
+	    if (pc < 0)
+	    {
+		fprintf(stderr, "R_InitTextures: texture %.8s: negative patchcount %d"
+			" - treating as 0\n", mtexture->name, pc);
+		pc = 0;
+	    }
+	    /* texture_t already has patches[1]; extra slots for pc-1 more. */
+	    texture = textures[i] =
+		Z_Malloc (sizeof(texture_t)
+			  + sizeof(texpatch_t)*(pc > 0 ? pc - 1 : 0),
+			  PU_STATIC, 0);
+	    texture->patchcount = pc;
+	}
+
 	texture->width = SHORT(mtexture->width);
 	texture->height = SHORT(mtexture->height);
-	texture->patchcount = SHORT(mtexture->patchcount);
 
 	memcpy (texture->name, mtexture->name, sizeof(texture->name));
 	mpatch = &mtexture->patches[0];
@@ -541,13 +649,21 @@ void R_InitTextures (void)
 	    patch->originx = SHORT(mpatch->originx);
 	    patch->originy = SHORT(mpatch->originy);
 	    pnum = SHORT(mpatch->patch);
-	    /* Bounds-check pnum before indexing patchlookup (stack alloca buffer).
-	     * Out-of-range patch indices in the WAD cause a SEGV in vanilla DOOM. */
-	    patch->patch = (pnum >= 0 && pnum < nummappatches) ? patchlookup[pnum] : -1;
+	    /* Bounds-check pnum before indexing patchlookup (malloc'd buffer).
+	     * Out-of-range patch indices in the WAD would previously SEGV. */
+	    if (pnum < 0 || pnum >= nummappatches)
+	    {
+		fprintf(stderr, "R_InitTextures: patch index %d out of range "
+			"(max %d) in texture %.8s - skipping\n",
+			pnum, nummappatches-1, texture->name);
+		patch->patch = -1;
+		continue;
+	    }
+	    patch->patch = patchlookup[pnum];
 	    if (patch->patch == -1)
 	    {
-		I_Error ("R_InitTextures: Missing patch in texture %s",
-			 texture->name);
+		fprintf(stderr, "R_InitTextures: missing patch in texture %.8s"
+			" - skipping\n", texture->name);
 	    }
 	}		
 	texturecolumnlump[i] = Z_Malloc (texture->width*2, PU_STATIC,0);
@@ -563,19 +679,24 @@ void R_InitTextures (void)
 	totalwidth += texture->width;
     }
 
+    free (patchlookup);
     Z_Free (maptex1);
     if (maptex2)
 	Z_Free (maptex2);
     
     // Precalculate whatever possible.	
+    fprintf(stderr, "[doom] R_InitTextures: numtextures=%d, running R_GenerateLookup...\n",
+	    numtextures);
     for (i=0 ; i<numtextures ; i++)
 	R_GenerateLookup (i);
-    
+    fprintf(stderr, "[doom] R_InitTextures: R_GenerateLookup loop done\n");
+
     // Create translation table for global animation.
     texturetranslation = Z_Malloc ((numtextures+1)*4, PU_STATIC, 0);
     
     for (i=0 ; i<numtextures ; i++)
 	texturetranslation[i] = i;
+    fprintf(stderr, "[doom] R_InitTextures: complete\n");
 }
 
 
@@ -628,6 +749,7 @@ void R_InitSpriteLumps (void)
 	spriteoffset[i] = SHORT(patch->leftoffset)<<FRACBITS;
 	spritetopoffset[i] = SHORT(patch->topoffset)<<FRACBITS;
     }
+    fprintf(stderr, "[doom] R_InitSpriteLumps: done (%d lumps)\n", numspritelumps);
 }
 
 

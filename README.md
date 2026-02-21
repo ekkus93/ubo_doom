@@ -24,76 +24,74 @@ Video is rendered **240×240 letterboxed** to preserve Doom’s aspect ratio; au
 
 ## Requirements
 
-### Build machine
 - `gcc`, `make`
 - ALSA dev headers: `libasound2-dev`
-
-### Target device (ubo)
 - `ubo_app` installed and runnable
 - External services enabled via `UBO_SERVICES_PATH`
 - A legally obtained IWAD (e.g. `doom.wad`, `doom2.wad`, `doom1.wad`)
 
-## Quick start (recommended workflow)
+## Quick start
 
-### 1) Build the shared library
-From repo root:
+All steps are run on the ubo device.
+
+### 1) Clone the repo
+
+```bash
+git clone https://github.com/ekkus93/ubo_doom.git ~/work/ubo_doom
+cd ~/work/ubo_doom
+```
+
+### 2) Install build dependencies
+
+```bash
+sudo apt install gcc make libasound2-dev
+```
+
+### 3) Build the shared library
 
 ```bash
 ./native/scripts/build_libubodoom.sh
 ```
 
-Outputs:
-- `native/out/libubodoom.so`
+Outputs `native/out/libubodoom.so`.
 
-### 2) Copy artifacts to the ubo device
-On the ubo device, create:
+### 4) Install the library and IWAD
 
 ```bash
 mkdir -p ~/doom
+cp native/out/libubodoom.so ~/doom/
+cp /path/to/your/doom2.wad ~/doom/   # or doom.wad, doom1.wad, etc.
 ```
 
-Copy:
-- `native/out/libubodoom.so` → `~/doom/libubodoom.so`
-- your legally obtained IWAD → `~/doom/doom2.wad` (or similar)
+This repo does **not** include an IWAD. You are responsible for providing one legally.
 
-This repo does **not** include an IWAD.
-
-You can use:
+### 5) Deploy the ubo service
 
 ```bash
-./native/scripts/install_to_device.sh <user@host>
+mkdir -p ~/ubo_services
+cp -r ubo_service/070-doom ~/ubo_services/
 ```
 
-### 3) Deploy the ubo service
-Copy the service directory to the device:
+### 6) Configure environment variables
+
+Add to your ubo_app environment (e.g. `~/.config/ubo_app/ubo_app.env` or wherever `UBO_SERVICES_PATH` is set):
 
 ```bash
-rsync -av ubo_service/070-doom/ <user@host>:~/ubo_services/070-doom/
+UBO_SERVICES_PATH=$HOME/ubo_services
+UBO_DOOM_LIB=$HOME/doom/libubodoom.so
+UBO_DOOM_IWAD=$HOME/doom/doom2.wad
+UBO_DOOM_FPS=30
 ```
 
-### 4) Configure environment variables on the device
-Example environment:
+See `ubo_service/070-doom/config/doom.env.example` and `system/env/ubo_app.env.example` for reference.
 
-- `UBO_SERVICES_PATH=$HOME/ubo_services`
-- `UBO_DOOM_LIB=$HOME/doom/libubodoom.so`
-- `UBO_DOOM_IWAD=$HOME/doom/doom2.wad`
-- `UBO_DOOM_FPS=30`
+### 7) Run ubo_app
 
-See:
-- `ubo_service/070-doom/config/doom.env.example`
-- `system/env/ubo_app.env.example`
-
-### 5) Run ubo_app
 However you normally start it (systemd or manual). The Doom launcher will appear once the service is enabled.
 
 ## Controls (default mapping)
 
 See `docs/CONTROLS.md`.
-
-## Notes / legal
-
-- This repo does **not** distribute IWADs.
-- You are responsible for ensuring you have the legal right to use the IWAD you provide.
 
 ## Troubleshooting
 

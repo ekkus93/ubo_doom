@@ -74,16 +74,35 @@ cp -r ubo_service/070-doom ~/ubo_services/
 
 ### 6) Configure environment variables
 
-Add to your ubo_app environment (e.g. `~/.config/ubo_app/ubo_app.env` or wherever `UBO_SERVICES_PATH` is set):
+ubo_app needs to know where to find external services and the Doom assets. How you set this depends on how ubo_app is started:
+
+**If running via systemd (most common):**
 
 ```bash
-UBO_SERVICES_PATH=$HOME/ubo_services
-UBO_DOOM_LIB=$HOME/doom/libubodoom.so
-UBO_DOOM_IWAD=$HOME/doom/doom2.wad
-UBO_DOOM_FPS=30
+mkdir -p ~/.config/systemd/user/ubo_app.service.d
+cp ~/work/ubo_doom/system/systemd/ubo_app_override.conf.example \
+   ~/.config/systemd/user/ubo_app.service.d/override.conf
+systemctl --user daemon-reload
 ```
 
-See `ubo_service/070-doom/config/doom.env.example` and `system/env/ubo_app.env.example` for reference.
+Edit `override.conf` to set the correct IWAD filename if yours isn't `doom2.wad`.
+
+**If running manually:**
+
+```bash
+source ~/work/ubo_doom/system/env/ubo_app.env.example
+```
+
+Or add those `export` lines to your `~/.bashrc`.
+
+The key variables are:
+
+| Variable | Value |
+|---|---|
+| `UBO_SERVICES_PATH` | `$HOME/ubo_services` |
+| `UBO_DOOM_LIB` | `$HOME/doom/libubodoom.so` |
+| `UBO_DOOM_IWAD` | `$HOME/doom/doom2.wad` (or your IWAD filename) |
+| `UBO_DOOM_FPS` | `30` |
 
 ### 7) Run ubo_app
 

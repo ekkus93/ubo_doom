@@ -27,6 +27,7 @@ rcsid[] = "$Id: m_bbox.c,v 1.1 1997/02/03 22:45:10 b1 Exp $";
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <setjmp.h>
 
 #include <stdarg.h>
 #include <sys/time.h>
@@ -171,6 +172,17 @@ void I_Error (char *error, ...)
     va_end (argptr);
 
     fflush( stderr );
+
+    // In library mode, jumping out via longjmp instead of exit() to avoid
+    // killing the host process (ubo_app).
+    {
+        extern int ubo_library_mode;
+        extern int ubo_error_jmp_valid;
+        extern jmp_buf ubo_error_jmp;
+        if (ubo_library_mode && ubo_error_jmp_valid) {
+            longjmp(ubo_error_jmp, 1);
+        }
+    }
 
     // Shutdown. Here might be other errors.
     if (demorecording)

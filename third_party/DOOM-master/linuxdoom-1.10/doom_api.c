@@ -1,7 +1,9 @@
 #include "doom_api.h"
 
+#include <setjmp.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 #include "doomdef.h"
 #include "doomstat.h"
@@ -16,6 +18,10 @@
 #include "s_sound.h"
 
 int ubo_library_mode = 0;
+
+// Jump buffer used by I_Error in library mode to avoid calling exit().
+jmp_buf ubo_error_jmp;
+int ubo_error_jmp_valid = 0;
 
 // Filled by i_video_ubo.c via extern.
 uint8_t ubo_rgba[320 * 200 * 4];
@@ -58,6 +64,15 @@ int doom_init(const char* iwad_path)
     myargc = g_argc;
     myargv = g_argv;
 
+    // Catch I_Error calls (which would otherwise call exit()) via longjmp.
+    ubo_error_jmp_valid = 1;
+    if (setjmp(ubo_error_jmp) != 0) {
+        // I_Error fired during init — abort cleanly without killing the process.
+        ubo_error_jmp_valid = 0;
+        fprintf(stderr, "[doom] doom_init aborted via I_Error longjmp\n");
+        return -1;
+    }
+
     // D_DoomMain will call I_Init(), initialize sound/video, and then return (because ubo_library_mode=1).
     D_DoomMain();
 
@@ -65,6 +80,7 @@ int doom_init(const char* iwad_path)
     // Our i_video_ubo backend doesn't need it, but keeping the call preserves expected init sequencing.
     I_InitGraphics();
 
+    ubo_error_jmp_valid = 0;
     g_inited = 1;
     return 0;
 }

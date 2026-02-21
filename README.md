@@ -69,8 +69,10 @@ This repo does **not** include an IWAD. You are responsible for providing one le
 
 ```bash
 mkdir -p ~/ubo_services
-cp -r ubo_service/070-doom ~/ubo_services/
+ln -s ~/work/ubo_doom/ubo_service/070-doom ~/ubo_services/070-doom
 ```
+
+Using a symlink means you can `git pull` in `~/work/ubo_doom` and the service is immediately up to date without re-copying files.
 
 ### 6) Configure environment variables
 

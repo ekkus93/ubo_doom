@@ -106,7 +106,22 @@ The key variables are:
 
 ### 7) Run ubo_app
 
-However you normally start it (systemd or manual). The Doom launcher will appear once the service is enabled.
+**If running via systemd:**
+
+```bash
+systemctl --user restart ubo_app
+```
+
+Once restarted, the Doom launcher tile should appear in the ubo_app menu.
+
+**If running manually:**
+
+```bash
+source ~/work/ubo_doom/system/env/ubo_app.env.example
+ubo_app
+```
+
+The Doom launcher tile will appear in the menu.
 
 ## Controls (default mapping)
 

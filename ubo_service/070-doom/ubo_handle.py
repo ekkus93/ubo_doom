@@ -20,8 +20,7 @@ async def setup(register_reducer: ReducerRegistrar) -> None:
         init_service()
         print("[doom] init_service() completed OK", flush=True)
     except Exception:
-        print("[doom] init_service() FAILED:", flush=True)
-        traceback.print_exc()
+        print("[doom] init_service() FAILED:\n" + traceback.format_exc(), flush=True)
 
 
 register(

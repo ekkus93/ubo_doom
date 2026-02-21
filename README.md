@@ -5,11 +5,12 @@ Video is rendered **240×240 letterboxed** to preserve Doom’s aspect ratio; au
 
 ## What this repo contains
 
-- `patches/ubodoom_linuxdoom110.patch`  
-  Patch against classic `linuxdoom-1.10` that builds an embeddable shared library (`libubodoom.so`) with:
+- `third_party/DOOM-master/linuxdoom-1.10/`  
+  The classic `linuxdoom-1.10` source, pre-modified to build an embeddable shared library (`libubodoom.so`) with:
   - headless video backend (palette capture + framebuffer export)
   - ALSA audio backend (replaces OSS `/dev/dsp`)
   - minimal C API for embedding: init/tick/framebuffer/input
+  - 64-bit (aarch64) portability fixes
 
 - `ubo_service/070-doom/`  
   The ubo external service that:
@@ -34,14 +35,7 @@ Video is rendered **240×240 letterboxed** to preserve Doom’s aspect ratio; au
 
 ## Quick start (recommended workflow)
 
-### 1) Prepare third-party Doom source
-Put the Doom source tree under:
-
-- `third_party/DOOM-master/linuxdoom-1.10/`
-
-This repo intentionally does **not** include an IWAD.
-
-### 2) Build the shared library
+### 1) Build the shared library
 From repo root:
 
 ```bash
@@ -51,7 +45,7 @@ From repo root:
 Outputs:
 - `native/out/libubodoom.so`
 
-### 3) Copy artifacts to the ubo device
+### 2) Copy artifacts to the ubo device
 On the ubo device, create:
 
 ```bash
@@ -60,7 +54,9 @@ mkdir -p ~/doom
 
 Copy:
 - `native/out/libubodoom.so` → `~/doom/libubodoom.so`
-- your IWAD → `~/doom/doom2.wad` (or similar)
+- your legally obtained IWAD → `~/doom/doom2.wad` (or similar)
+
+This repo does **not** include an IWAD.
 
 You can use:
 
@@ -68,14 +64,14 @@ You can use:
 ./native/scripts/install_to_device.sh <user@host>
 ```
 
-### 4) Deploy the ubo service
+### 3) Deploy the ubo service
 Copy the service directory to the device:
 
 ```bash
 rsync -av ubo_service/070-doom/ <user@host>:~/ubo_services/070-doom/
 ```
 
-### 5) Configure environment variables on the device
+### 4) Configure environment variables on the device
 Example environment:
 
 - `UBO_SERVICES_PATH=$HOME/ubo_services`
@@ -87,7 +83,7 @@ See:
 - `ubo_service/070-doom/config/doom.env.example`
 - `system/env/ubo_app.env.example`
 
-### 6) Run ubo_app
+### 5) Run ubo_app
 However you normally start it (systemd or manual). The Doom launcher will appear once the service is enabled.
 
 ## Controls (default mapping)

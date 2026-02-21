@@ -38,6 +38,8 @@ static const char rcsid[] = "$Id: d_main.c,v 1.8 1997/02/03 22:45:09 b1 Exp $";
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <string.h>
+#include <ctype.h>
 #endif
 
 
@@ -108,6 +110,7 @@ boolean		singletics = false; // debug flag to cancel adaptiveness
 //extern  int	musicVolume;
 
 extern  boolean	inhelpscreens;
+extern int ubo_library_mode;  // set by doom_api when embedded
 
 skill_t		startskill;
 int             startepisode;
@@ -569,6 +572,44 @@ void IdentifyVersion (void)
     char*	doom2wad;
 
     char*	doom2fwad;
+
+    // UBO embedding: allow explicit IWAD via "-iwad /path/to/doom?.wad"
+    {
+        int p = M_CheckParm ("-iwad");
+        if (p && p < myargc-1)
+        {
+            const char* iwad_path = myargv[p+1];
+            if (access(iwad_path, R_OK) != 0)
+            {
+                printf("WAD file %s not found or not readable\n", iwad_path);
+                exit(1);
+            }
+
+            // Infer game mode from filename (good enough for Doom/Ultimate Doom/Doom II)
+            {
+                const char* base = strrchr(iwad_path, '/');
+                base = base ? base + 1 : iwad_path;
+
+                // Lowercase compare without relying on strcasecmp
+                char tmp[32];
+                int i = 0;
+                while (base[i] && i < (int)sizeof(tmp)-1) { tmp[i] = (char)tolower((unsigned char)base[i]); i++; }
+                tmp[i] = 0;
+
+                if (!strncmp(tmp, "doom2", 5) || !strncmp(tmp, "plutonia", 8) || !strncmp(tmp, "tnt", 3))
+                    gamemode = commercial;
+                else if (!strncmp(tmp, "doomu", 5))
+                    gamemode = retail;
+                else if (!strncmp(tmp, "doom1", 5))
+                    gamemode = shareware;
+                else
+                    gamemode = registered;
+            }
+
+            D_AddFile ((char*)iwad_path);
+            return;
+        }
+    }
     char*	plutoniawad;
     char*	tntwad;
 
@@ -1137,6 +1178,7 @@ void D_DoomMain (void)
     {
 	singledemo = true;              // quit after one demo
 	G_DeferedPlayDemo (myargv[p+1]);
+	if (ubo_library_mode) return;
 	D_DoomLoop ();  // never returns
     }
 	
@@ -1144,6 +1186,7 @@ void D_DoomMain (void)
     if (p && p < myargc-1)
     {
 	G_TimeDemo (myargv[p+1]);
+	if (ubo_library_mode) return;
 	D_DoomLoop ();  // never returns
     }
 	
@@ -1167,5 +1210,6 @@ void D_DoomMain (void)
 
     }
 
+    if (ubo_library_mode) return;
     D_DoomLoop ();  // never returns
 }

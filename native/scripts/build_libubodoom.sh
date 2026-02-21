@@ -3,7 +3,6 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DOOM_DIR="${ROOT_DIR}/third_party/DOOM-master/linuxdoom-1.10"
-PATCH_FILE="${ROOT_DIR}/patches/ubodoom_linuxdoom110.patch"
 OUT_DIR="${ROOT_DIR}/native/out"
 
 mkdir -p "${OUT_DIR}"
@@ -14,14 +13,8 @@ if [[ ! -d "${DOOM_DIR}" ]]; then
   exit 1
 fi
 
-# Apply patch (idempotent-ish)
+# Source files are pre-patched directly in third_party/
 cd "${DOOM_DIR}"
-if patch -p1 --dry-run < "${PATCH_FILE}" >/dev/null 2>&1; then
-  echo "Applying patch..."
-  patch -p1 < "${PATCH_FILE}"
-else
-  echo "Patch appears already applied (or does not apply cleanly). Continuing..."
-fi
 
 echo "Building libubodoom.so..."
 make libubodoom.so

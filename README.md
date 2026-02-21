@@ -79,9 +79,9 @@ ubo_app needs to know where to find external services and the Doom assets. How y
 **If running via systemd (most common):**
 
 ```bash
-mkdir -p ~/.config/systemd/user/ubo_app.service.d
+mkdir -p ~/.config/systemd/user/ubo-app.service.d
 cp ~/work/ubo_doom/system/systemd/ubo_app_override.conf.example \
-   ~/.config/systemd/user/ubo_app.service.d/override.conf
+   ~/.config/systemd/user/ubo-app.service.d/override.conf
 systemctl --user daemon-reload
 ```
 
@@ -109,7 +109,7 @@ The key variables are:
 **If running via systemd:**
 
 ```bash
-systemctl --user restart ubo_app
+systemctl --user restart ubo-app
 ```
 
 Once restarted, the Doom launcher tile should appear in the ubo_app menu.
@@ -118,7 +118,7 @@ Once restarted, the Doom launcher tile should appear in the ubo_app menu.
 
 ```bash
 source ~/work/ubo_doom/system/env/ubo_app.env.example
-ubo_app
+ubo-app
 ```
 
 The Doom launcher tile will appear in the menu.

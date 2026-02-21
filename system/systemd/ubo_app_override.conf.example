@@ -1,5 +1,5 @@
-# Example systemd drop-in (copy into something like):
-#   ~/.config/systemd/user/ubo_app.service.d/override.conf
+# Example systemd drop-in (copy into):
+#   ~/.config/systemd/user/ubo-app.service.d/override.conf
 # then `systemctl --user daemon-reload` and restart service.
 
 [Service]

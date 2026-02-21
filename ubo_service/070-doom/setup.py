@@ -41,6 +41,7 @@ as wrapped by `ubo_service/070-doom/native/doom_lib.py`:
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
@@ -58,7 +59,12 @@ from ubo_app.store.services.display import DisplayPauseAction, DisplayResumeActi
 from ubo_app.store.ubo_actions import UboApplicationItem
 from ubo_app.utils.gui import UboPageWidget
 
-from .native.doom_lib import DoomLib, UboKey
+# service_thread loads this file as a standalone module (no package context),
+# so relative imports don't work — insert the service dir and import absolutely.
+_SERVICE_DIR = os.path.dirname(os.path.abspath(__file__))
+if _SERVICE_DIR not in sys.path:
+    sys.path.insert(0, _SERVICE_DIR)
+from native.doom_lib import DoomLib, UboKey
 
 
 # LCD geometry (ubo display uses inclusive rectangle coords: (x0,y0,x1,y1))

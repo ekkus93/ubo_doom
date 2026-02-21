@@ -55,7 +55,7 @@ from ubo_app.store.core.types import RegisterRegularAppAction
 from ubo_app.store.main import store
 from ubo_app.store.services.audio import AudioDevice, AudioSetMuteStatusAction
 from ubo_app.store.services.display import DisplayPauseAction, DisplayResumeAction
-from ubo_app.store.ubo_actions import UboApplicationItem, register_application
+from ubo_app.store.ubo_actions import UboApplicationItem
 from ubo_app.utils.gui import UboPageWidget
 
 from .native.doom_lib import DoomLib, UboKey
@@ -239,15 +239,13 @@ def init_service() -> None:
     """
     Register Doom as a regular application item in the main menu.
     """
-    register_application(application_id="doom:main", application=DoomPage)
-
     store.dispatch(
         RegisterRegularAppAction(
             key="doom",
             menu_item=UboApplicationItem(
                 label="Doom",
                 icon="󰺵",
-                application_id="doom:main",
+                application=DoomPage,
             ),
         ),
     )

@@ -12,9 +12,16 @@ async def setup(register_reducer: ReducerRegistrar) -> None:
 
     register_reducer(reducer)
 
-    from setup import init_service
+    import traceback
 
-    init_service()
+    try:
+        from setup import init_service
+        print("[doom] calling init_service()", flush=True)
+        init_service()
+        print("[doom] init_service() completed OK", flush=True)
+    except Exception:
+        print("[doom] init_service() FAILED:", flush=True)
+        traceback.print_exc()
 
 
 register(

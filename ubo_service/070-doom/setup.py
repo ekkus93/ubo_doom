@@ -42,6 +42,8 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
+import traceback
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
@@ -155,32 +157,42 @@ class DoomPage(UboPageWidget):
 
         self._fps = float(os.environ.get("UBO_DOOM_FPS", "30"))
         self._evt = None
+        self._doom: DoomLib | None = None
+        self._video: _VideoPipe | None = None
+        self._rgba_view: "np.ndarray | None" = None
 
-        lib_path = Path(os.environ.get("UBO_DOOM_LIB", str(Path.home() / "doom" / "libubodoom.so")))
-        iwad_path = os.environ.get("UBO_DOOM_IWAD", str(Path.home() / "doom" / "doom2.wad"))
+        self._lib_path = Path(os.environ.get("UBO_DOOM_LIB", str(Path.home() / "doom" / "libubodoom.so")))
+        self._iwad_path = os.environ.get("UBO_DOOM_IWAD", str(Path.home() / "doom" / "doom2.wad"))
 
-        self._doom = DoomLib(lib_path)
-        self._doom.init(iwad_path)
-
-        fb = self._doom.framebuffer_info()
-        if fb.width <= 0 or fb.height <= 0:
-            raise RuntimeError(f"Invalid Doom framebuffer size: {fb.width}x{fb.height}")
-
-        self._src_w = fb.width
-        self._src_h = fb.height
-
-        # No-copy numpy view over Doom RGBA buffer
-        rgba_ptr = self._doom.rgba_ptr()
-        flat = np.ctypeslib.as_array(rgba_ptr, shape=(self._src_w * self._src_h * 4,))
-        self._rgba_view = flat.reshape((self._src_h, self._src_w, 4))
-
-        self._video = _VideoPipe.create(src_w=self._src_w, src_h=self._src_h)
-
-        # Pause normal ubo display updates and mute ubo output (Doom uses ALSA directly).
+        # Pause ubo display/audio eagerly so they don't interfere during init.
         store.dispatch(DisplayPauseAction())
         store.dispatch(AudioSetMuteStatusAction(is_mute=True, device=AudioDevice.OUTPUT))
 
-        self._evt = Clock.schedule_interval(self._tick, 1.0 / self._fps)
+        # Init Doom in a background thread so the Kivy main thread isn't blocked.
+        threading.Thread(target=self._init_doom, daemon=True).start()
+
+    def _init_doom(self) -> None:
+        try:
+            self._doom = DoomLib(self._lib_path)
+            self._doom.init(self._iwad_path)
+
+            fb = self._doom.framebuffer_info()
+            if fb.width <= 0 or fb.height <= 0:
+                raise RuntimeError(f"Invalid Doom framebuffer size: {fb.width}x{fb.height}")
+
+            rgba_ptr = self._doom.rgba_ptr()
+            flat = np.ctypeslib.as_array(rgba_ptr, shape=(fb.width * fb.height * 4,))
+            self._rgba_view = flat.reshape((fb.height, fb.width, 4))
+            self._video = _VideoPipe.create(src_w=fb.width, src_h=fb.height)
+
+            # Schedule tick start back on the Kivy main thread.
+            Clock.schedule_once(lambda _dt: self._start_tick(), 0)
+        except Exception:
+            print("[doom] DoomPage._init_doom FAILED:\n" + traceback.format_exc(), flush=True)
+
+    def _start_tick(self) -> None:
+        if self._evt is None:
+            self._evt = Clock.schedule_interval(self._tick, 1.0 / self._fps)
 
     # ------------
     # Input mapping
@@ -215,6 +227,8 @@ class DoomPage(UboPageWidget):
     # Main loop
     # ----------
     def _tick(self, _dt: float) -> None:
+        if self._doom is None or self._video is None or self._rgba_view is None:
+            return
         self._doom.tick()
         rgb565_be = self._video.rgba_to_rgb565_be(self._rgba_view)
 
@@ -236,7 +250,8 @@ class DoomPage(UboPageWidget):
 
         # Shut down Doom (best effort)
         try:
-            self._doom.shutdown()
+            if self._doom is not None:
+                self._doom.shutdown()
         except Exception:
             pass
 

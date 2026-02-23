@@ -185,6 +185,10 @@ class DoomPage(UboPageWidget):
             self._rgba_view = flat.reshape((fb.height, fb.width, 4))
             self._video = _VideoPipe.create(src_w=fb.width, src_h=fb.height)
 
+            # Unmute audio now that Doom owns the ALSA output.
+            # (It was muted above to prevent ubo_app audio during init.)
+            store.dispatch(AudioSetMuteStatusAction(is_mute=False, device=AudioDevice.OUTPUT))
+
             # Schedule tick start back on the Kivy main thread.
             Clock.schedule_once(lambda _dt: self._start_tick(), 0)
         except Exception:

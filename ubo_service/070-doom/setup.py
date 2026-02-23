@@ -89,6 +89,29 @@ ACTIVE_H: Final[int] = 150
 PAD_TOP: Final[int] = (OUT_H - ACTIVE_H) // 2  # 45
 
 
+def _resolve_launch_paths(iwad_path_raw: str) -> tuple[str, str, str]:
+    """Resolve canonical Doom launch paths.
+
+    Returns:
+        (iwad_path_abs, launch_cwd_abs, config_path_abs)
+    """
+    iwad_path = Path(iwad_path_raw).expanduser().resolve()
+
+    launch_cwd_env = os.environ.get("UBO_DOOM_CWD", "").strip()
+    if launch_cwd_env:
+        launch_cwd = Path(launch_cwd_env).expanduser().resolve()
+    else:
+        launch_cwd = iwad_path.parent
+
+    config_path_env = os.environ.get("UBO_DOOM_CONFIG", "").strip()
+    if config_path_env:
+        config_path = Path(config_path_env).expanduser().resolve()
+    else:
+        config_path = launch_cwd / "doomrc.cfg"
+
+    return str(iwad_path), str(launch_cwd), str(config_path)
+
+
 @dataclass
 class _VideoPipe:
     """
@@ -173,7 +196,14 @@ class DoomPage(UboPageWidget):
         self._thread: threading.Thread | None = None
 
         self._lib_path = Path(os.environ.get("UBO_DOOM_LIB", str(Path.home() / "doom" / "libubodoom.so")))
-        self._iwad_path = os.environ.get("UBO_DOOM_IWAD", str(Path.home() / "doom" / "doom2.wad"))
+        iwad_default = os.environ.get("UBO_DOOM_IWAD", str(Path.home() / "doom" / "doom2.wad"))
+        self._iwad_path, self._launch_cwd, self._config_path = _resolve_launch_paths(iwad_default)
+
+        # Enforce a single canonical config location and launch cwd for libubodoom.
+        Path(self._launch_cwd).mkdir(parents=True, exist_ok=True)
+        Path(self._config_path).parent.mkdir(parents=True, exist_ok=True)
+        os.environ["UBO_DOOM_CWD"] = self._launch_cwd
+        os.environ["UBO_DOOM_CONFIG"] = self._config_path
 
         # Pause ubo display so it doesn't interfere with Doom's LCD output.
         # We intentionally do NOT mute OUTPUT audio here — muting the hardware
@@ -185,6 +215,10 @@ class DoomPage(UboPageWidget):
 
     def _init_doom(self) -> None:
         try:
+            print(
+                f"[doom] launch paths: cwd={self._launch_cwd} config={self._config_path} iwad={self._iwad_path}",
+                flush=True,
+            )
             self._doom = DoomLib(self._lib_path)
             self._doom.init(self._iwad_path)
 

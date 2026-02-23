@@ -309,12 +309,12 @@ void G_BuildTiccmd (ticcmd_t* cmd)
     if (gamekeydown[key_up]) 
     {
 	// fprintf(stderr, "up\n");
-	forward += forwardmove[speed]; 
+	forward += 7; 
     }
     if (gamekeydown[key_down]) 
     {
 	// fprintf(stderr, "down\n");
-	forward -= forwardmove[speed]; 
+	forward -= 7; 
     }
     if (joyymove < 0) 
 	forward += forwardmove[speed]; 
@@ -324,7 +324,16 @@ void G_BuildTiccmd (ticcmd_t* cmd)
 	side += sidemove[speed]; 
     if (gamekeydown[key_strafeleft]) 
 	side -= sidemove[speed];
-    
+
+    // Diagnostic: log movement state whenever a movement key is active.
+    if (gamekeydown[key_up] || gamekeydown[key_down])
+    {
+        fprintf(stderr,
+            "[doom] BuildTiccmd: up=%d down=%d speed_key=%d speed=%d fwd=%d\n",
+            gamekeydown[key_up], gamekeydown[key_down],
+            gamekeydown[key_speed], speed, forward);
+    }
+
     // buttons
     cmd->chatchar = HU_dequeueChatChar(); 
  
@@ -420,7 +429,7 @@ void G_BuildTiccmd (ticcmd_t* cmd)
 	side = MAXPLMOVE; 
     else if (side < -MAXPLMOVE) 
 	side = -MAXPLMOVE; 
- 
+
     cmd->forwardmove += forward; 
     cmd->sidemove += side;
     

@@ -4,6 +4,105 @@
 
 ---
 
+## 2026-02-23 — Root cause confirmed: sign loss in `ticcmd_t.forwardmove`
+
+### Finding
+- Verified target compiler defines `__CHAR_UNSIGNED__ = 1` on device.
+- `ticcmd_t.forwardmove` and `ticcmd_t.sidemove` were declared as plain `char`.
+- On this target, negative values (e.g. `-7`) can be reinterpreted as positive bytes,
+  explaining UP/DOWN behaving similarly.
+
+### Fix
+- Updated `third_party/DOOM-master/linuxdoom-1.10/d_ticcmd.h`:
+  - `forwardmove` and `sidemove` changed from `char` to `signed char`.
+
+### Deploy
+- Rebuilt/deployed to `ubo@192.168.88.112` and restarted `ubo-app`.
+
+### Status
+- Sign handling is now explicit and portable across toolchains where plain `char` is unsigned.
+- User validation pending on hardware controls.
+
+## 2026-02-23 — Force UP/DOWN forwardmove to +15/-15 (experiment)
+
+### Request
+- User requested deterministic movement test: UP should map to `fwd=15`, DOWN to `fwd=-15`.
+
+### What was changed
+- `third_party/DOOM-master/linuxdoom-1.10/g_game.c`
+  - Changed keyboard branches in `G_BuildTiccmd()`:
+    - `gamekeydown[key_up]` → `forward += 15`
+    - `gamekeydown[key_down]` → `forward -= 15`
+- `third_party/DOOM-master/linuxdoom-1.10/doom_api.c`
+  - Added hard post-build override immediately after `G_BuildTiccmd(cmd)`:
+    - UP only  → `cmd->forwardmove = 15`
+    - DOWN only → `cmd->forwardmove = -15`
+    - both pressed → `cmd->forwardmove = 0`
+  - This guarantees deterministic values regardless of internal mouse/joystick contributions.
+
+### Deploy
+- Rebuilt and deployed on device:
+  - `./native/scripts/build_on_device.sh ubo@192.168.88.112`
+  - restarted `ubo-app`.
+
+### Status
+- Experiment is live on device and ready for user validation.
+
+## 2026-02-23 — Deploy + verify canonical cwd/config enforcement on device
+
+### What was done
+- Ran native on-device build/deploy successfully:
+  - `./native/scripts/build_on_device.sh ubo@192.168.88.112`
+  - Installed `/home/ubo/doom/libubodoom.so`
+  - Synced `/home/ubo/ubo_services/070-doom/`
+- Restarted service: `systemctl --user restart ubo-app`.
+
+### Verification results
+- Doom service registration still healthy in log:
+  - `[doom] calling init_service()`
+  - `[doom] init_service() completed OK`
+- Confirmed deployed native library includes new logic strings:
+  - `UBO_DOOM_CWD`
+  - `UBO_DOOM_CONFIG`
+  - `[doom] failed to chdir to UBO_DOOM_CWD=%s`
+- Confirmed deployed service file contains `_resolve_launch_paths()` and launch-path env exports.
+
+### Current status
+- Patch is deployed and present on device.
+- Runtime line `[doom] launch paths: ...` is emitted only when the Doom page is opened (during `DoomPage._init_doom`), so that specific log confirmation is pending user launching Doom once.
+
+## 2026-02-23 — Enforce canonical Doom config path + launch cwd
+
+### Root cause
+- Embedded Doom init was only passing `-iwad`; linuxdoom then defaulted config to `$HOME/.doomrc`
+  (`d_main.c` → `basedefault`), so runtime behavior depended on ambient HOME/cwd and stale host config.
+- No explicit launch cwd was enforced, so filesystem behavior could vary by service startup context.
+
+### Fixes applied
+- `ubo_service/070-doom/setup.py`
+  - Added `_resolve_launch_paths()` to canonicalize:
+    - IWAD path (absolute)
+    - launch cwd (`UBO_DOOM_CWD` or IWAD parent)
+    - config path (`UBO_DOOM_CONFIG` or `<cwd>/doomrc.cfg`)
+  - Exports canonical `UBO_DOOM_CWD` / `UBO_DOOM_CONFIG` env values before `doom_init()`.
+  - Ensures launch/config parent directories exist.
+  - Logs launch paths at init for diagnostics.
+- `third_party/DOOM-master/linuxdoom-1.10/doom_api.c`
+  - `doom_init()` now reads `UBO_DOOM_CWD` and `chdir()`s before engine startup.
+  - Appends `-config <UBO_DOOM_CONFIG>` to `myargv` when provided.
+  - Increased internal argv buffer size to safely hold extra args.
+- `ubo_service/070-doom/config/doom.env.example`
+  - Documented new optional `UBO_DOOM_CWD` and `UBO_DOOM_CONFIG` variables.
+
+### Validation
+- `pytest -q tests/test_doom_controller.py` → **58 passed**.
+- Note: native C changes require rebuild/redeploy of `libubodoom.so` on target.
+
+### Current status / pending
+- Canonical config location + launch cwd enforcement is implemented in code.
+- Pending on-device rebuild/deploy and runtime verification that Doom now ignores stale `$HOME/.doomrc`
+  and always uses the configured `UBO_DOOM_CONFIG`.
+
 ## 2026-02-23T14:44:46-0800 (90d3254) — Restore BACK×N navigation; correct go_back branch order
 
 ### Root cause

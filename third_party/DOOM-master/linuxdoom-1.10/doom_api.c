@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <unistd.h>
 #include <execinfo.h>
 
 #include "doomdef.h"
@@ -36,6 +37,11 @@ void G_BuildTiccmd(ticcmd_t* cmd);
 void G_Ticker(void);
 void M_Ticker(void);
 void D_Display(void);
+
+// Input state exported by g_game.c.
+extern boolean gamekeydown[256];
+extern int key_up;
+extern int key_down;
 
 int ubo_library_mode = 0;
 
@@ -74,7 +80,7 @@ static void doom_crash_handler(int sig)
 }
 
 // Keep argv storage alive for the lifetime of the process.
-static char* g_argv[8];
+static char* g_argv[16];
 static int g_argc = 0;
 static char g_prog[] = "ubodoom";
 
@@ -96,11 +102,25 @@ static int map_ubo_key(ubo_key_t key)
 
 int doom_init(const char* iwad_path)
 {
+    const char* launch_cwd;
+    const char* config_path;
+
     if (g_inited == 1) return 0;
     if (g_inited == -1) return -1;  /* previous init failed; DOOM globals are dirty */
     if (!iwad_path) return -1;
 
     ubo_library_mode = 1;
+
+    launch_cwd = getenv("UBO_DOOM_CWD");
+    config_path = getenv("UBO_DOOM_CONFIG");
+
+    if (launch_cwd && launch_cwd[0] != '\0') {
+        if (chdir(launch_cwd) != 0) {
+            fprintf(stderr, "[doom] failed to chdir to UBO_DOOM_CWD=%s\n", launch_cwd);
+            g_inited = -1;
+            return -1;
+        }
+    }
 
     // Build a minimal argv: [ubodoom, -iwad, <path>]
     // Zone heap size is controlled by mb_used in m_misc.c defaults (set to 32 MB).
@@ -108,6 +128,10 @@ int doom_init(const char* iwad_path)
     g_argv[g_argc++] = g_prog;
     g_argv[g_argc++] = (char*)"-iwad";
     g_argv[g_argc++] = strdup(iwad_path);
+    if (config_path && config_path[0] != '\0') {
+        g_argv[g_argc++] = (char*)"-config";
+        g_argv[g_argc++] = strdup(config_path);
+    }
 
     myargc = g_argc;
     myargv = g_argv;
@@ -178,12 +202,16 @@ int doom_init(const char* iwad_path)
     // in ~/.doomrc such as key_right=0 and key_left=0 which would break turning.
     // Also locks key_fire to KEY_RCTRL — KEY_ENTER is stolen by HU_MSGREFRESH
     // (hu_stuff.h) and would be eaten before reaching G_Responder.
-    extern int key_fire, key_right, key_left, key_up, key_down;
+    extern int key_fire, key_right, key_left, key_up, key_down, key_speed;
     key_fire  = KEY_RCTRL;
     key_right = KEY_RIGHTARROW;
     key_left  = KEY_LEFTARROW;
     key_up    = KEY_UPARROW;
     key_down  = KEY_DOWNARROW;
+    // Disable run modifier: the UBO controller has no shift key.
+    // Setting key_speed=0 means gamekeydown[0] is checked; key 0 is never
+    // sent by doom_key_down(), so speed is always 0 (walk, forwardmove[0]=25).
+    key_speed = 0;
 
     return 0;
 }
@@ -222,7 +250,22 @@ void doom_tick(void)
     I_StartFrame();
     I_StartTic();
     D_ProcessEvents();
-    G_BuildTiccmd(&netcmds[consoleplayer][maketic%BACKUPTICS]);
+    {
+        ticcmd_t* cmd = &netcmds[consoleplayer][maketic%BACKUPTICS];
+        G_BuildTiccmd(cmd);
+
+        // UBO movement experiment: force fixed forward values for UP/DOWN.
+        // This intentionally overrides any forward component produced inside
+        // G_BuildTiccmd (keyboard accel, mouse, joystick) so we can test
+        // deterministic movement magnitudes on hardware.
+        if (gamekeydown[key_up] && !gamekeydown[key_down]) {
+            cmd->forwardmove = 7;
+        } else if (gamekeydown[key_down] && !gamekeydown[key_up]) {
+            cmd->forwardmove = -7;
+        } else if (gamekeydown[key_up] && gamekeydown[key_down]) {
+            cmd->forwardmove = 0;
+        }
+    }
     if (advancedemo)
         D_DoAdvanceDemo();
     M_Ticker();
@@ -258,6 +301,7 @@ void doom_key_down(ubo_key_t key)
 {
     int doom_key = map_ubo_key(key);
     event_t ev;
+    fprintf(stderr, "[doom] key_down ubo=%d doom=0x%02x\n", (int)key, doom_key);
     ev.type = ev_keydown;
     ev.data1 = doom_key;
     ev.data2 = 0;
@@ -269,6 +313,7 @@ void doom_key_up(ubo_key_t key)
 {
     int doom_key = map_ubo_key(key);
     event_t ev;
+    fprintf(stderr, "[doom] key_up   ubo=%d doom=0x%02x\n", (int)key, doom_key);
     ev.type = ev_keyup;
     ev.data1 = doom_key;
     ev.data2 = 0;

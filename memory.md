@@ -4,7 +4,7 @@
 
 ---
 
-## 2026-02-23 — Extract DoomController; add unit tests; fix menuactive() race condition
+## 2026-02-23T14:31:12-0800 (717fafd) — Extract DoomController; add unit tests; fix menuactive() race condition
 
 ### Root causes fixed
 - **Race condition in go_back() / _btn_l3()**: both were calling `doom.menuactive()` directly

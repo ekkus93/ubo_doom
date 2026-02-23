@@ -251,16 +251,14 @@ class DoomPage(UboPageWidget):
             self._evt.cancel()
             self._evt = None
 
-        # Restore ubo state
+        # Restore ubo display and audio so the rest of the UI works normally
+        # while Doom is not visible.  We do NOT call doom_shutdown here because
+        # the Doom engine is not designed to be re-initialised within the same
+        # process (it re-adds WAD lumps and corrupts zone/tic state on second
+        # init).  Leaving it warm means re-entering Doom just restarts the tick
+        # loop and resumes from where the user left off.
         store.dispatch(AudioSetMuteStatusAction(is_mute=False, device=AudioDevice.OUTPUT))
         store.dispatch(DisplayResumeAction())
-
-        # Shut down Doom (best effort)
-        try:
-            if self._doom is not None:
-                self._doom.shutdown()
-        except Exception:
-            pass
 
 
 def init_service() -> None:

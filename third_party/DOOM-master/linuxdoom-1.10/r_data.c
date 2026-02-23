@@ -75,7 +75,7 @@ typedef struct
     short	patch;
     short	stepdir;
     short	colormap;
-} mappatch_t;
+} __attribute__((packed)) mappatch_t;
 
 
 //
@@ -83,16 +83,31 @@ typedef struct
 // A DOOM wall texture is a list of patches
 // which are to be combined in a predefined order.
 //
+// NOTE: This struct is overlaid directly on WAD binary data. Field sizes and
+// offsets must match the WAD format exactly on all platforms:
+//
+//   offset  0 : name[8]            (8 bytes)
+//   offset  8 : masked             (int32 in WAD - matches original 'boolean' on 32-bit)
+//   offset 12 : width              (int16)
+//   offset 14 : height             (int16)
+//   offset 16 : columndirectory    (int32 in WAD - was void** = 8 bytes on 64-bit, BUG)
+//   offset 20 : patchcount         (int16)
+//   offset 22 : patches[1]
+//
+// The original 'boolean masked' was OK on 32-bit (enum = int = 4 bytes) but
+// the 'void **columndirectory' was 8 bytes on 64-bit vs 4 bytes in the WAD,
+// pushing patchcount to offset 24 instead of the correct offset 20.
+//
 typedef struct
 {
     char		name[8];
-    boolean		masked;	
+    int32_t		masked;			// 4 bytes in WAD ('boolean' = enum = int = 4 bytes)
     short		width;
     short		height;
-    void		**columndirectory;	// OBSOLETE
+    int32_t		columndirectory;	// 4 bytes in WAD (was void** = 8 bytes on 64-bit, WRONG)
     short		patchcount;
     mappatch_t	patches[1];
-} maptexture_t;
+} __attribute__((packed)) maptexture_t;
 
 
 // A single patch from a texture definition,
@@ -573,13 +588,16 @@ void R_InitTextures (void)
     }
     numtextures = numtextures1 + numtextures2;
 	
-    textures = Z_Malloc (numtextures*4, PU_STATIC, 0);
-    texturecolumnlump = Z_Malloc (numtextures*4, PU_STATIC, 0);
-    texturecolumnofs = Z_Malloc (numtextures*4, PU_STATIC, 0);
-    texturecomposite = Z_Malloc (numtextures*4, PU_STATIC, 0);
+    /* On 64-bit platforms pointers are 8 bytes, not 4.  Use sizeof(*ptr) so
+     * each pointer array is correctly sized regardless of architecture.
+     * The non-pointer arrays (int / fixed_t) remain *4 which is correct. */
+    textures           = Z_Malloc (numtextures*sizeof(*textures),           PU_STATIC, 0);
+    texturecolumnlump  = Z_Malloc (numtextures*sizeof(*texturecolumnlump),  PU_STATIC, 0);
+    texturecolumnofs   = Z_Malloc (numtextures*sizeof(*texturecolumnofs),   PU_STATIC, 0);
+    texturecomposite   = Z_Malloc (numtextures*sizeof(*texturecomposite),   PU_STATIC, 0);
     texturecompositesize = Z_Malloc (numtextures*4, PU_STATIC, 0);
-    texturewidthmask = Z_Malloc (numtextures*4, PU_STATIC, 0);
-    textureheight = Z_Malloc (numtextures*4, PU_STATIC, 0);
+    texturewidthmask   = Z_Malloc (numtextures*4, PU_STATIC, 0);
+    textureheight      = Z_Malloc (numtextures*4, PU_STATIC, 0);
 
     totalwidth = 0;
     
@@ -614,6 +632,7 @@ void R_InitTextures (void)
 	    I_Error ("R_InitTextures: bad texture directory");
 	
 	mtexture = (maptexture_t *) ( (byte *)maptex + offset);
+
 
 	/* Read patchcount before the Z_Malloc so we can guard against
 	 * a zero or negative value.  A bad patchcount causes the naive

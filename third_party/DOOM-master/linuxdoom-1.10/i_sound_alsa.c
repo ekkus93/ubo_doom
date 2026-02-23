@@ -726,35 +726,12 @@ I_ShutdownSound(void)
 
 void
 I_InitSound()
-{ 
-#ifdef SNDSERV
-  char buffer[256];
-
-  if (getenv("DOOMWADDIR"))
-    sprintf(buffer, "%s/%s", getenv("DOOMWADDIR"), sndserver_filename);
-  else
-    sprintf(buffer, "%s", sndserver_filename);
-
-  if (access(buffer, X_OK))
-  {
-    fprintf(stderr, "Could not find sound server [%s]\n", buffer);
-    exit(-1);
-  }
-  // start sound process
-  if (0==fork())
-  {
-    execl(buffer, sndserver_filename, NULL);
-    fprintf(stderr, "Could not start sound server [%s]\n", buffer);
-    exit(-1);
-  }
-  // init sound server
-  if (0>(audio_fd = open("/dev/ttyp0", O_RDWR)))
-  {
-    fprintf(stderr, "Could not open /dev/ttyp0\n");
-    exit(-1);
-  }
-#else
-  // ALSA output (16-bit stereo @ 11025 Hz, interleaved)
+{
+  /* We always use in-process ALSA output regardless of the SNDSERV flag.
+   * doomdef.h defines SNDSERV=1 (for the external sndserver approach), but
+   * this file is the ALSA replacement.  The sndserver globals (sndserver,
+   * sndserver_filename) are still defined above (inside #ifdef SNDSERV) to
+   * satisfy references from m_misc.c; we just skip launching the process. */
   int err;
   if (audio_pcm) return;
 
@@ -782,7 +759,6 @@ I_InitSound()
     audio_pcm = NULL;
     return;
   }
-#endif
 }
 
 

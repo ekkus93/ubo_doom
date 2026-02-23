@@ -137,18 +137,18 @@ class TestGoBack:
         _set_in_level(ctrl)
         assert ctrl.go_back() is True
 
-    def test_menu_active_sends_escape(self, ctrl: DoomController, rec: Recorder) -> None:
+    def test_menu_active_sends_menu_select(self, ctrl: DoomController, rec: Recorder) -> None:
+        """Menu open: BACK confirms/selects — allows BACK×N navigation to start a game."""
         _set_menu_open(ctrl)
         ctrl.go_back()
-        assert rec.last_key is UboKey.ESCAPE
+        assert rec.last_key is UboKey.MENU_SELECT
 
     def test_menu_active_absorbs_event(self, ctrl: DoomController, rec: Recorder) -> None:
         _set_menu_open(ctrl)
         assert ctrl.go_back() is True
 
-    def test_default_state_sends_escape(self, ctrl: DoomController, rec: Recorder) -> None:
-        # Title screen / demo: not alive, not in level, no menu.
-        # ESCAPE opens the Doom main menu from the title screen.
+    def test_title_screen_sends_escape(self, ctrl: DoomController, rec: Recorder) -> None:
+        """Title/demo screen (menu_active=False, in_level=False): ESCAPE opens main menu."""
         ctrl.go_back()
         assert rec.last_key is UboKey.ESCAPE
 
@@ -156,22 +156,6 @@ class TestGoBack:
         _set_intermission(ctrl)
         ctrl.go_back()
         assert rec.last_key is UboKey.ESCAPE
-
-    def test_never_sends_menu_select(self, ctrl: DoomController, rec: Recorder) -> None:
-        """go_back must never send MENU_SELECT (ENTER) — that causes ping-pong."""
-        for setup in [
-            lambda: None,
-            lambda: _set_in_level(ctrl),
-            lambda: _set_menu_open(ctrl),
-            lambda: _set_intermission(ctrl),
-        ]:
-            setup()
-            rec.clear()
-            ctrl.go_back()
-            assert rec.last_key is not UboKey.MENU_SELECT, (
-                f"go_back() sent MENU_SELECT (ping-pong risk) in state: "
-                f"in_level={ctrl.in_level} menu={ctrl.menu_active}"
-            )
 
     def test_always_returns_true(self, ctrl: DoomController, rec: Recorder) -> None:
         """go_back must return True in every state so ubo doesn't close the page."""
@@ -186,17 +170,17 @@ class TestGoBack:
                 f"go_back() returned False: in_level={ctrl.in_level} menu={ctrl.menu_active}"
             )
 
+    def test_in_level_fire_not_menu_select(self, ctrl: DoomController, rec: Recorder) -> None:
+        """Regression: in-level BACK must be FIRE, not a menu action."""
+        _set_in_level(ctrl)
+        ctrl.go_back()
+        assert rec.last_key is not UboKey.MENU_SELECT
+
     def test_in_level_fire_not_escape(self, ctrl: DoomController, rec: Recorder) -> None:
-        """Regression: in-level go_back must NOT send ESCAPE (would open menu mid-game)."""
+        """Regression: in-level BACK must not send ESCAPE (would open menu mid-game)."""
         _set_in_level(ctrl)
         ctrl.go_back()
         assert rec.last_key is not UboKey.ESCAPE
-
-    def test_menu_escape_not_fire(self, ctrl: DoomController, rec: Recorder) -> None:
-        """Regression: menu go_back must send ESCAPE, not FIRE."""
-        _set_menu_open(ctrl)
-        ctrl.go_back()
-        assert rec.last_key is not UboKey.FIRE
 
 
 # ------------------------------------------------------------------ #
@@ -422,38 +406,61 @@ class TestUpdateGameState:
 
 class TestPingPongRegression:
     """
-    Regression test for the race condition that caused go_back() to alternate
-    between ESCAPE and ENTER when opening New Game.
+    Regression tests for the ENTER/ESCAPE ping-pong bug.
 
-    Root cause: go_back() was calling doom.menuactive() directly from the Kivy
-    main thread, which races with the tick thread.  The fix caches the state in
-    update_game_state() (tick thread only) and go_back() reads only the cached value.
+    Root cause (original bug): go_back() called doom.menuactive() from the Kivy
+    main thread, racing with the tick thread. Stale reads caused alternating keys.
 
-    This test simulates the exact scenario from the logs:
-      - Doom is on the main menu (menu_active=True, in_level=False)
-      - User presses BACK repeatedly
-      - Each call should emit ESCAPE, never ENTER
+    Root cause (second bug): branch order was wrong — menu_active→ESCAPE and
+    otherwise→MENU_SELECT, causing the menu to open on MENU_SELECT then close on
+    ESCAPE, repeating indefinitely.
+
+    Correct order (now): title→ESCAPE (opens menu), menu_active→MENU_SELECT
+    (confirms/navigates forward). No alternation possible.
     """
 
-    def test_repeated_go_back_in_menu_always_escapes(
+    def test_title_screen_then_menu_does_not_ping_pong(
         self, ctrl: DoomController, rec: Recorder
     ) -> None:
+        """Simulate the BACK×3 workflow: title→ESCAPE, then menus→MENU_SELECT."""
+        # Step 1: title screen
+        rec.clear()
+        ctrl.go_back()
+        assert rec.last_key is UboKey.ESCAPE
+
+        # Step 2: menu is now open (tick thread would set this after doom.tick())
+        ctrl.update_game_state(alive=True, gamestate=GS_LEVEL, menuactive=True)
+        rec.clear()
+        ctrl.go_back()
+        assert rec.last_key is UboKey.MENU_SELECT  # confirm New Game
+
+        # Step 3: still in menu (episode select)
+        rec.clear()
+        ctrl.go_back()
+        assert rec.last_key is UboKey.MENU_SELECT  # confirm episode
+
+    def test_repeated_go_back_in_menu_always_menu_selects(
+        self, ctrl: DoomController, rec: Recorder
+    ) -> None:
+        """Once the menu is open, every BACK should confirm — no ESCAPE mixed in."""
         _set_menu_open(ctrl)
         for _ in range(10):
             rec.clear()
             ctrl.go_back()
-            assert rec.last_key is UboKey.ESCAPE, "Expected ESCAPE, got wrong key (ping-pong bug)"
+            assert rec.last_key is UboKey.MENU_SELECT, (
+                f"Expected MENU_SELECT in open menu, got {rec.last_key} (ping-pong bug)"
+            )
 
     def test_repeated_go_back_on_title_screen_always_escapes(
         self, ctrl: DoomController, rec: Recorder
     ) -> None:
-        """Regression: title screen (menu_active=False, in_level=False) must always
-        send ESCAPE, never MENU_SELECT/ENTER, to prevent ping-pong."""
-        # No update_game_state call — default state mirrors Doom startup
+        """Title screen with no menu: BACK must always send ESCAPE, never MENU_SELECT."""
         for _ in range(10):
             rec.clear()
             ctrl.go_back()
-            assert rec.last_key is UboKey.ESCAPE, "Expected ESCAPE on title screen (ping-pong bug)"
+            assert rec.last_key is UboKey.ESCAPE, (
+                f"Expected ESCAPE on title screen, got {rec.last_key}"
+            )
 
     def test_repeated_go_back_in_level_always_fires(
         self, ctrl: DoomController, rec: Recorder

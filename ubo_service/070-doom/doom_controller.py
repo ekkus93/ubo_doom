@@ -15,7 +15,7 @@ The state machine rules are:
   Normal mode (default):
     go_up      → forward  (hold=8 ticks), always
     go_down    → backward (hold=8 ticks), always
-    go_back    → FIRE (in-level), ESCAPE (everything else)
+    go_back    → FIRE (in-level), MENU_SELECT/confirm (menu open), ESCAPE (title/demo)
     btn_l2     → turn LEFT with hold=12  (>SLOWTURNTICS=10 for full speed)
     btn_l3     → turn RIGHT with hold=12 (in-level), MENU_SELECT/ENTER (in menu)
     toggle_mode→ switch to ALT mode (only when in-level; no-op otherwise)
@@ -130,23 +130,24 @@ class DoomController:
         close the Doom service page).
 
         Routing:
-          in-level (no menu)  → FIRE (shoot weapon)
-          everything else     → ESCAPE
+          in-level (no menu)        → FIRE (shoot weapon)
+          menu visible              → MENU_SELECT (confirm/navigate forward)
+          title screen / demo       → ESCAPE (opens the Doom main menu)
 
-        ESCAPE is correct for all non-level states:
-          - Menu open:        go up one level in the menu hierarchy
-          - Title/demo screen: open the main menu (Doom opens menu on ESC)
-          - Intermission/finale: any key advances; ESCAPE works
+        This allows the common workflow: BACK × N to start a game from the title
+        screen — first BACK opens the menu, subsequent BACKs confirm each menu
+        selection (New Game → episode → skill → game starts).
 
-        This avoids a ping-pong where MENU_SELECT (ENTER) would re-open the
-        menu that ESCAPE just closed.
-
-        L3 (btn_l3) handles menu confirmation via MENU_SELECT when _menu_active.
+        No ping-pong risk: title sends ESCAPE (menu_active=False→True), then
+        menu sends MENU_SELECT (menu_active=True) which either enters a sub-menu
+        or starts a level, never toggling back to False until a level is loaded.
 
         Returns True always (Kivy handler return value meaning "event handled").
         """
         if self._in_level:
             self._tap(UboKey.FIRE)
+        elif self._menu_active:
+            self._tap(UboKey.MENU_SELECT)
         else:
             self._tap(UboKey.ESCAPE)
         return True

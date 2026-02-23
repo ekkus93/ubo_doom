@@ -328,11 +328,8 @@ void G_BuildTiccmd (ticcmd_t* cmd)
     // buttons
     cmd->chatchar = HU_dequeueChatChar(); 
  
-    { static int _dbg=0; if((_dbg++%30)==0) fprintf(stderr,"[doom] G_BuildTiccmd: key_fire=%d gkd=%d gamestate=%d menuactive=%d\n",key_fire,(int)gamekeydown[key_fire],(int)gamestate,(int)menuactive); }
     if (gamekeydown[key_fire] || mousebuttons[mousebfire] 
 	|| joybuttons[joybfire]) {
-	fprintf(stderr, "[doom] G_BuildTiccmd: FIRE detected (key_fire=%d, gamekeydown=%d, gamestate=%d, menuactive=%d)\n",
-		key_fire, gamekeydown[key_fire], gamestate, menuactive);
 	cmd->buttons |= BT_ATTACK;
     }
  
@@ -563,7 +560,6 @@ boolean G_Responder (event_t* ev)
     switch (ev->type) 
     { 
       case ev_keydown: 
-	fprintf(stderr, "[doom] G_Responder: keydown data1=%d gamestate=%d menuactive=%d\n", ev->data1, (int)gamestate, (int)menuactive);
 	if (ev->data1 == KEY_PAUSE) 
 	{ 
 	    sendpause = true; 

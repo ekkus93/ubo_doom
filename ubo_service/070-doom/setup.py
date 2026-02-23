@@ -47,8 +47,10 @@ as wrapped by `ubo_service/070-doom/native/doom_lib.py`:
 from __future__ import annotations
 
 import os
+import queue
 import sys
 import threading
+import time
 import traceback
 from dataclasses import dataclass
 from pathlib import Path
@@ -155,16 +157,19 @@ class DoomPage(UboPageWidget):
         super().__init__(**kwargs)
 
         self._fps = float(os.environ.get("UBO_DOOM_FPS", "30"))
-        self._evt = None
         self._doom: DoomLib | None = None
         self._video: _VideoPipe | None = None
         self._rgba_view: "np.ndarray | None" = None
-        # Keys held for N more ticks: key_down already sent, key_up will be sent
-        # in _tick once the counter hits 0.  This guarantees key_up is only posted
-        # AFTER doom_tick has run G_BuildTiccmd at least once with the key held,
-        # avoiding the race where Clock.schedule_once fired key_up before doom_tick
-        # had a chance to drain the event queue.
+        # Key events posted from the Kivy main thread, drained by the tick thread.
+        self._key_queue: queue.Queue[tuple[UboKey, int]] = queue.Queue()
+        # Held-key countdown dict — only accessed by the tick thread.
         self._held: dict[UboKey, int] = {}
+        # Cached in-level state written by tick thread, read by go_back().
+        # Simple bool: GIL makes single-assignment reads/writes atomic in CPython.
+        self._in_level: bool = False
+        # Stop signal and thread handle for the tick loop.
+        self._stop_evt = threading.Event()
+        self._thread: threading.Thread | None = None
 
         self._lib_path = Path(os.environ.get("UBO_DOOM_LIB", str(Path.home() / "doom" / "libubodoom.so")))
         self._iwad_path = os.environ.get("UBO_DOOM_IWAD", str(Path.home() / "doom" / "doom2.wad"))
@@ -204,37 +209,29 @@ class DoomPage(UboPageWidget):
             )
 
     def _start_tick(self) -> None:
-        if self._evt is None:
-            self._evt = Clock.schedule_interval(self._tick, 1.0 / self._fps)
+        if self._thread is None or not self._thread.is_alive():
+            self._stop_evt.clear()
+            self._thread = threading.Thread(
+                target=self._tick_loop, daemon=True, name="doom-tick"
+            )
+            self._thread.start()
 
     # ------------
     # Input mapping
     # ------------
     def go_up(self) -> None:
-        # Normal: backward.  ALT: turn right.
-        # (Physical UP button on Ubo is oriented as backward in Doom's frame.)
-        self._tap(UboKey.RIGHT if self._alt_mode else UboKey.DOWN)
+        # Physical UP => forward in Doom (KEY_UPARROW).
+        self._tap(UboKey.UP)
 
     def go_down(self) -> None:
-        # Normal: forward.  ALT: turn left.
-        self._tap(UboKey.LEFT if self._alt_mode else UboKey.UP)
+        # Physical DOWN => backward in Doom (KEY_DOWNARROW).
+        self._tap(UboKey.DOWN)
 
     def go_back(self) -> bool:
         # Intercept BACK so it never exits Doom.
-        # * In-game (GS_LEVEL=0) with no menu overlay → fire weapon (KEY_RCTRL).
-        # * In menu, intermission, demo-screen, or any other state → send KEY_ENTER
-        #   so the player can navigate and confirm menu selections.
-        in_level = (
-            self._doom is not None
-            and self._doom.is_alive()
-            and self._doom.gamestate() == 0  # GS_LEVEL
-            and not self._doom.menuactive()
-        )
-        key = UboKey.FIRE if in_level else UboKey.MENU_SELECT
-        print(
-            f"[doom] go_back: in_level={in_level}, alt_mode={self._alt_mode}, key={key.name}",
-            flush=True,
-        )
+        # _in_level is kept current by the tick thread (GIL-safe bool).
+        # In-game with no menu → fire; anywhere else → KEY_ENTER for menu nav.
+        key = UboKey.FIRE if self._in_level else UboKey.MENU_SELECT
         self._tap(key)
         return True
 
@@ -272,65 +269,100 @@ class DoomPage(UboPageWidget):
             self._tap(UboKey.RIGHT, hold_ticks=12)
 
     def _tap(self, key: UboKey, hold_ticks: int = 2) -> None:
-        # Post key_down immediately.  Key_up is sent in _tick after the held
-        # counter counts down to 0 — this guarantees key_up is only sent AFTER
-        # doom_tick has run at least hold_ticks G_BuildTiccmd calls with the key
-        # held.  Use hold_ticks>=12 for turn keys to exceed SLOWTURNTICS (10).
+        # Non-blocking: enqueue the event for the tick thread to process.
+        # The tick thread calls key_down and manages the hold countdown.
         if self._doom is None:
             return
-        print(f"[doom] _tap: key={key} hold={hold_ticks}, doom_alive={self._doom.is_alive()}", flush=True)
-        if key not in self._held:
-            self._doom.key_down(key)
-        self._held[key] = hold_ticks  # (re)set countdown
+        self._key_queue.put_nowait((key, hold_ticks))
 
     # ----------
-    # Main loop
+    # Tick thread
     # ----------
-    def _tick(self, _dt: float) -> None:
-        if self._doom is None or self._video is None or self._rgba_view is None:
+    def _tick_loop(self) -> None:
+        """Runs entirely on the doom-tick background thread."""
+        doom = self._doom
+        video = self._video
+        rgba_view = self._rgba_view
+        if doom is None or video is None or rgba_view is None:
             return
-        # Decrement held-key counters and release any that have expired.
-        # This runs BEFORE doom.tick() so that key_up events are in the queue
-        # when D_ProcessEvents drains it — but only after the previous tick
-        # already saw the key held.
-        for key in list(self._held):
-            self._held[key] -= 1
-            if self._held[key] <= 0:
-                print(f"[doom] _tick: releasing key={key}", flush=True)
-                if self._doom:
-                    self._doom.key_up(key)
-                del self._held[key]
-        self._doom.tick()
-        # If I_Error or SIGSEGV fired mid-tick the engine marks itself dead.
-        # Stop the tick loop, reset the engine so it can be restarted next
-        # time the user opens Doom, and close the page cleanly.
-        if not self._doom.is_alive():
-            print("[doom] engine died mid-tick, stopping loop", flush=True)
-            self._held.clear()
-            self._doom.reset()
-            if self._evt is not None:
-                self._evt.cancel()
-                self._evt = None
-            store.dispatch(DisplayResumeAction())
-            _instance_id = self.id
-            Clock.schedule_once(
-                lambda _dt: store.dispatch(CloseApplicationEvent(application_instance_id=_instance_id)), 0
+
+        interval = 1.0 / self._fps
+        frame = 0
+        while not self._stop_evt.is_set():
+            t0 = time.monotonic()
+
+            # Drain key events posted by the main thread.
+            while True:
+                try:
+                    key, hold_ticks = self._key_queue.get_nowait()
+                    if key not in self._held:
+                        doom.key_down(key)
+                    self._held[key] = hold_ticks  # (re)set countdown
+                except queue.Empty:
+                    break
+
+            # Release any held keys whose countdown has expired.
+            # Runs BEFORE doom.tick() so key_up is in the event queue when
+            # D_ProcessEvents drains it on this same tick.
+            for key in list(self._held):
+                self._held[key] -= 1
+                if self._held[key] <= 0:
+                    doom.key_up(key)
+                    del self._held[key]
+
+            doom.tick()
+            frame += 1
+
+            # Update cached state for go_back() on the main thread.
+            self._in_level = (
+                doom.is_alive()
+                and doom.gamestate() == 0  # GS_LEVEL
+                and not doom.menuactive()
             )
-            return
-        rgb565_be = self._video.rgba_to_rgb565_be(self._rgba_view)
 
-        # ubo_app display.render_block uses inclusive rectangle
-        lcd_display.render_block(
-            rectangle=RECT_FULL,
-            data_bytes=rgb565_be,
-            bypass_pause=True,
-        )
+            # If I_Error or SIGSEGV fired mid-tick the engine marks itself dead.
+            if not doom.is_alive():
+                self._held.clear()
+                doom.reset()
+                Clock.schedule_once(lambda _dt: self._on_doom_died(), 0)
+                return
+
+            # Render to LCD every other game tick (~15fps LCD vs 30fps physics).
+            # This halves SPI DMA bandwidth, reducing contention with the WiFi
+            # SDIO controller on the RPi4 AXI bus (known SPI/SDIO DMA conflict).
+            if frame % 2 == 0:
+                rgb565_be = video.rgba_to_rgb565_be(rgba_view)
+                lcd_display.render_block(
+                    rectangle=RECT_FULL,
+                    data_bytes=rgb565_be,
+                    bypass_pause=True,
+                )
+
+            # Sleep for whatever is left of the frame budget.
+            elapsed = time.monotonic() - t0
+            remaining = interval - elapsed
+            if remaining > 0:
+                time.sleep(remaining)
+
+    def _on_doom_died(self) -> None:
+        """Called on the Kivy main thread when the engine dies mid-tick."""
+        store.dispatch(DisplayResumeAction())
+        _instance_id = self.id
+        store.dispatch(CloseApplicationEvent(application_instance_id=_instance_id))
 
     def on_close(self) -> None:
+        # Signal the tick thread to stop and wait briefly for it to exit.
+        self._stop_evt.set()
+        if self._thread is not None:
+            self._thread.join(timeout=1.0)
+            self._thread = None
         self._held.clear()
-        if self._evt is not None:
-            self._evt.cancel()
-            self._evt = None
+        # Drain any queued key events so they don't linger across re-opens.
+        while not self._key_queue.empty():
+            try:
+                self._key_queue.get_nowait()
+            except queue.Empty:
+                break
 
         # Restore ubo display so the rest of the UI works normally while Doom
         # is not visible.  We do NOT call doom_shutdown here because the Doom

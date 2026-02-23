@@ -4,6 +4,27 @@
 
 ---
 
+## 2026-02-23T14:39:37-0800 (412b126) — Fix go_back ping-pong: always ESCAPE when not in-level
+
+### Root cause
+`go_back()` had three branches: FIRE (in-level), ESCAPE (menu active), MENU_SELECT/ENTER (other).
+The "other" branch fired on the title screen, opened the main menu with ENTER, then the next
+BACK press sent ESCAPE to close it, toggling indefinitely. New Game could never be reached.
+
+### Fix
+Removed the MENU_SELECT branch entirely. `go_back()` is now two cases only:
+- `_in_level=True` → FIRE
+- everything else → ESCAPE (title screen, menus, intermissions, finales)
+
+ESCAPE opens the Doom menu from the title screen, goes up one level in open menus, and
+advances intermissions/finales — correct in all states. L3 handles menu confirm (MENU_SELECT).
+
+### Tests
+58 passed. Added: `test_default_state_sends_escape`, `test_intermission_sends_escape`,
+`test_never_sends_menu_select`, `test_repeated_go_back_on_title_screen_always_escapes`.
+
+---
+
 ## 2026-02-23T14:31:12-0800 (717fafd) — Extract DoomController; add unit tests; fix menuactive() race condition
 
 ### Root causes fixed

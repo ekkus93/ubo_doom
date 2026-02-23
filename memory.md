@@ -4,6 +4,29 @@
 
 ---
 
+## 2026-02-23T14:44:46-0800 (90d3254) — Restore BACK×N navigation; correct go_back branch order
+
+### Root cause
+Previous fix (412b126) sent ESCAPE in ALL non-level states, which opened the Doom menu
+from the title screen but then also sent ESCAPE when the menu was already open — preventing
+forward navigation (confirming New Game, episode, skill).
+
+### Correct go_back() routing
+```
+in_level=True    → FIRE         (shoot weapon)
+menu_active=True → MENU_SELECT  (confirm/navigate forward in open menu)
+otherwise        → ESCAPE       (opens main menu from title/demo screen)
+```
+No ping-pong: title→ESCAPE opens menu→`menu_active=True`, then MENU_SELECT confirms items
+forward. State never alternates because MENU_SELECT doesn't close the menu.
+
+### Tests
+58 passed. Key new tests: `test_title_screen_then_menu_does_not_ping_pong`,
+`test_repeated_go_back_in_menu_always_menu_selects`,
+`test_repeated_go_back_on_title_screen_always_escapes`.
+
+---
+
 ## 2026-02-23T14:39:37-0800 (412b126) — Fix go_back ping-pong: always ESCAPE when not in-level
 
 ### Root cause

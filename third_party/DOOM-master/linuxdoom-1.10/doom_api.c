@@ -243,9 +243,11 @@ void doom_shutdown(void)
 
 void doom_key_down(ubo_key_t key)
 {
+    int doom_key = map_ubo_key(key);
+    fprintf(stderr, "[doom] doom_key_down: ubo_key=%d -> doom_key=%d\n", (int)key, doom_key);
     event_t ev;
     ev.type = ev_keydown;
-    ev.data1 = map_ubo_key(key);
+    ev.data1 = doom_key;
     ev.data2 = 0;
     ev.data3 = 0;
     D_PostEvent(&ev);
@@ -253,9 +255,11 @@ void doom_key_down(ubo_key_t key)
 
 void doom_key_up(ubo_key_t key)
 {
+    int doom_key = map_ubo_key(key);
+    fprintf(stderr, "[doom] doom_key_up:   ubo_key=%d -> doom_key=%d\n", (int)key, doom_key);
     event_t ev;
     ev.type = ev_keyup;
-    ev.data1 = map_ubo_key(key);
+    ev.data1 = doom_key;
     ev.data2 = 0;
     ev.data3 = 0;
     D_PostEvent(&ev);

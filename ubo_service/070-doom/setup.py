@@ -159,6 +159,12 @@ class DoomPage(UboPageWidget):
         self._doom: DoomLib | None = None
         self._video: _VideoPipe | None = None
         self._rgba_view: "np.ndarray | None" = None
+        # Keys held for N more ticks: key_down already sent, key_up will be sent
+        # in _tick once the counter hits 0.  This guarantees key_up is only posted
+        # AFTER doom_tick has run G_BuildTiccmd at least once with the key held,
+        # avoiding the race where Clock.schedule_once fired key_up before doom_tick
+        # had a chance to drain the event queue.
+        self._held: dict[UboKey, int] = {}
 
         self._lib_path = Path(os.environ.get("UBO_DOOM_LIB", str(Path.home() / "doom" / "libubodoom.so")))
         self._iwad_path = os.environ.get("UBO_DOOM_IWAD", str(Path.home() / "doom" / "doom2.wad"))
@@ -214,6 +220,7 @@ class DoomPage(UboPageWidget):
 
     def go_back(self) -> bool:
         # Intercept BACK so it fires instead of exiting Doom.
+        print(f"[doom] go_back called, alt_mode={self._alt_mode}", flush=True)
         self._tap(UboKey.FIRE)
         return True
 
@@ -244,18 +251,15 @@ class DoomPage(UboPageWidget):
         self._tap(UboKey.ESCAPE if self._alt_mode else UboKey.RIGHT)
 
     def _tap(self, key: UboKey) -> None:
-        # Key-down now, key-up after 2 tics.
-        # In-game movement/fire use key *state* (is the key held?), checked by
-        # G_BuildTiccmd once per tic.  Firing key_down and key_up in the same
-        # Python call means both events are processed in the same D_ProcessEvents
-        # call and the net state seen by G_BuildTiccmd is "released".
-        # Delaying key_up by 2/fps seconds (≥2 tics) ensures at least one
-        # G_BuildTiccmd call sees the key held down.
+        # Post key_down immediately.  Key_up is sent in _tick after the held
+        # counter counts down to 0 — this guarantees at least 2 doom_tick calls
+        # see the key held before it's released, with no Clock timer race.
         if self._doom is None:
             return
-        self._doom.key_down(key)
-        Clock.schedule_once(lambda _dt: self._doom and self._doom.key_up(key),
-                            2.0 / self._fps)
+        print(f"[doom] _tap: key={key}, doom_alive={self._doom.is_alive()}", flush=True)
+        if key not in self._held:
+            self._doom.key_down(key)
+        self._held[key] = 2  # hold for 2 ticks
 
     # ----------
     # Main loop
@@ -263,12 +267,24 @@ class DoomPage(UboPageWidget):
     def _tick(self, _dt: float) -> None:
         if self._doom is None or self._video is None or self._rgba_view is None:
             return
+        # Decrement held-key counters and release any that have expired.
+        # This runs BEFORE doom.tick() so that key_up events are in the queue
+        # when D_ProcessEvents drains it — but only after the previous tick
+        # already saw the key held.
+        for key in list(self._held):
+            self._held[key] -= 1
+            if self._held[key] <= 0:
+                print(f"[doom] _tick: releasing key={key}", flush=True)
+                if self._doom:
+                    self._doom.key_up(key)
+                del self._held[key]
         self._doom.tick()
         # If I_Error or SIGSEGV fired mid-tick the engine marks itself dead.
         # Stop the tick loop, reset the engine so it can be restarted next
         # time the user opens Doom, and close the page cleanly.
         if not self._doom.is_alive():
             print("[doom] engine died mid-tick, stopping loop", flush=True)
+            self._held.clear()
             self._doom.reset()
             if self._evt is not None:
                 self._evt.cancel()
@@ -289,6 +305,7 @@ class DoomPage(UboPageWidget):
         )
 
     def on_close(self) -> None:
+        self._held.clear()
         if self._evt is not None:
             self._evt.cancel()
             self._evt = None

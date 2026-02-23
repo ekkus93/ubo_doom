@@ -146,15 +146,32 @@ class TestGoBack:
         _set_menu_open(ctrl)
         assert ctrl.go_back() is True
 
-    def test_other_state_sends_menu_select(self, ctrl: DoomController, rec: Recorder) -> None:
-        # Default state: not alive, not in level, no menu
+    def test_default_state_sends_escape(self, ctrl: DoomController, rec: Recorder) -> None:
+        # Title screen / demo: not alive, not in level, no menu.
+        # ESCAPE opens the Doom main menu from the title screen.
         ctrl.go_back()
-        assert rec.last_key is UboKey.MENU_SELECT
+        assert rec.last_key is UboKey.ESCAPE
 
-    def test_intermission_sends_menu_select(self, ctrl: DoomController, rec: Recorder) -> None:
+    def test_intermission_sends_escape(self, ctrl: DoomController, rec: Recorder) -> None:
         _set_intermission(ctrl)
         ctrl.go_back()
-        assert rec.last_key is UboKey.MENU_SELECT
+        assert rec.last_key is UboKey.ESCAPE
+
+    def test_never_sends_menu_select(self, ctrl: DoomController, rec: Recorder) -> None:
+        """go_back must never send MENU_SELECT (ENTER) — that causes ping-pong."""
+        for setup in [
+            lambda: None,
+            lambda: _set_in_level(ctrl),
+            lambda: _set_menu_open(ctrl),
+            lambda: _set_intermission(ctrl),
+        ]:
+            setup()
+            rec.clear()
+            ctrl.go_back()
+            assert rec.last_key is not UboKey.MENU_SELECT, (
+                f"go_back() sent MENU_SELECT (ping-pong risk) in state: "
+                f"in_level={ctrl.in_level} menu={ctrl.menu_active}"
+            )
 
     def test_always_returns_true(self, ctrl: DoomController, rec: Recorder) -> None:
         """go_back must return True in every state so ubo doesn't close the page."""
@@ -165,7 +182,9 @@ class TestGoBack:
             lambda: _set_intermission(ctrl),
         ]:
             setup()
-            assert ctrl.go_back() is True, f"go_back() returned False in state: in_level={ctrl.in_level} menu={ctrl.menu_active}"
+            assert ctrl.go_back() is True, (
+                f"go_back() returned False: in_level={ctrl.in_level} menu={ctrl.menu_active}"
+            )
 
     def test_in_level_fire_not_escape(self, ctrl: DoomController, rec: Recorder) -> None:
         """Regression: in-level go_back must NOT send ESCAPE (would open menu mid-game)."""
@@ -173,11 +192,11 @@ class TestGoBack:
         ctrl.go_back()
         assert rec.last_key is not UboKey.ESCAPE
 
-    def test_menu_escape_not_menu_select(self, ctrl: DoomController, rec: Recorder) -> None:
-        """Regression: menu go_back must NOT send ENTER (would select INTO menus)."""
+    def test_menu_escape_not_fire(self, ctrl: DoomController, rec: Recorder) -> None:
+        """Regression: menu go_back must send ESCAPE, not FIRE."""
         _set_menu_open(ctrl)
         ctrl.go_back()
-        assert rec.last_key is not UboKey.MENU_SELECT
+        assert rec.last_key is not UboKey.FIRE
 
 
 # ------------------------------------------------------------------ #
@@ -423,7 +442,18 @@ class TestPingPongRegression:
         for _ in range(10):
             rec.clear()
             ctrl.go_back()
-            assert rec.last_key is UboKey.ESCAPE, "Expected ESCAPE, got ENTER (ping-pong bug)"
+            assert rec.last_key is UboKey.ESCAPE, "Expected ESCAPE, got wrong key (ping-pong bug)"
+
+    def test_repeated_go_back_on_title_screen_always_escapes(
+        self, ctrl: DoomController, rec: Recorder
+    ) -> None:
+        """Regression: title screen (menu_active=False, in_level=False) must always
+        send ESCAPE, never MENU_SELECT/ENTER, to prevent ping-pong."""
+        # No update_game_state call — default state mirrors Doom startup
+        for _ in range(10):
+            rec.clear()
+            ctrl.go_back()
+            assert rec.last_key is UboKey.ESCAPE, "Expected ESCAPE on title screen (ping-pong bug)"
 
     def test_repeated_go_back_in_level_always_fires(
         self, ctrl: DoomController, rec: Recorder

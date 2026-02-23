@@ -15,7 +15,7 @@ The state machine rules are:
   Normal mode (default):
     go_up      → forward  (hold=8 ticks), always
     go_down    → backward (hold=8 ticks), always
-    go_back    → FIRE (in-level), ESCAPE (menu active), ENTER (other)
+    go_back    → FIRE (in-level), ESCAPE (everything else)
     btn_l2     → turn LEFT with hold=12  (>SLOWTURNTICS=10 for full speed)
     btn_l3     → turn RIGHT with hold=12 (in-level), MENU_SELECT/ENTER (in menu)
     toggle_mode→ switch to ALT mode (only when in-level; no-op otherwise)
@@ -130,18 +130,25 @@ class DoomController:
         close the Doom service page).
 
         Routing:
-          in-level, no menu  → FIRE (shoot)
-          menu visible       → ESCAPE (back up the menu hierarchy)
-          other state        → MENU_SELECT/ENTER (advance demos, intermissions, etc.)
+          in-level (no menu)  → FIRE (shoot weapon)
+          everything else     → ESCAPE
+
+        ESCAPE is correct for all non-level states:
+          - Menu open:        go up one level in the menu hierarchy
+          - Title/demo screen: open the main menu (Doom opens menu on ESC)
+          - Intermission/finale: any key advances; ESCAPE works
+
+        This avoids a ping-pong where MENU_SELECT (ENTER) would re-open the
+        menu that ESCAPE just closed.
+
+        L3 (btn_l3) handles menu confirmation via MENU_SELECT when _menu_active.
 
         Returns True always (Kivy handler return value meaning "event handled").
         """
         if self._in_level:
             self._tap(UboKey.FIRE)
-        elif self._menu_active:
-            self._tap(UboKey.ESCAPE)
         else:
-            self._tap(UboKey.MENU_SELECT)
+            self._tap(UboKey.ESCAPE)
         return True
 
     def btn_l2(self) -> None:

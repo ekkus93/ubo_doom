@@ -1,104 +1,126 @@
 # Project Memory — ubo_doom
 
-## 2026-02-23T20:33:14Z — Session state after commit 533df66
+<!-- Append-only log. NEVER delete or overwrite entries. Prepend new sessions at the top. -->
 
-### Device
-- aarch64 Raspberry Pi 4, IP: 192.168.88.112 / ubo-rd.local
-- SSH: `ubo@ubo-rd.local`
-- Deploy C: `./native/scripts/build_on_device.sh ubo@ubo-rd.local`
-- Deploy Python: `scp ubo_service/070-doom/setup.py ubo@ubo-rd.local:~/ubo_services/070-doom/ && scp ubo_service/070-doom/native/doom_lib.py ubo@ubo-rd.local:~/ubo_services/070-doom/native/doom_lib.py`
-- Restart: `ssh ubo@ubo-rd.local 'systemctl --user restart ubo-app'`
-- Logs: `/tmp/ubo-app.log`
+---
 
-### Current state (what works)
-- Game loads, renders, animates (singletics path, 30 fps via Kivy Clock)
-- Movement: UP=forward, DOWN=backward, L2=turn left, L3=turn right, ALT+UP/DOWN=turn
-- BACK in-game → fires weapon (KEY_RCTRL)
-- BACK in menus / intermission / demo → sends KEY_ENTER to navigate/select
-- L2/L3 use hold_ticks=12 so they exceed SLOWTURNTICS=10 for full-speed turning
-- Key bindings forced in doom_init(): key_fire=KEY_RCTRL, arrows=KEY_LEFTARROW etc. (immune to .doomrc)
-- .doomrc deleted from device; no longer a threat to key bindings
+## 2026-02-23T13:10:03-0800 (d3314de) — Background thread; movement direction fix
 
-### Root cause history (for reference)
-- Fire never worked: `#define HU_MSGREFRESH KEY_ENTER` in hu_stuff.h — HU_Responder ate every KEY_ENTER
-- Fix: UBO_KEY_FIRE → KEY_RCTRL (0x9d = 157)
-- Menu regression: KEY_RCTRL doesn't navigate menus
-- Fix: context-aware BACK — gamestate()==0 && !menuactive() → FIRE, else MENU_SELECT (KEY_ENTER)
-- key_right/key_left were 0: ~/.doomrc on device had zeroed them; fixed by forcing in doom_init + deleting .doomrc
-- Timer race on key_up: Clock.schedule_once could land in same D_ProcessEvents drain; fixed with _held dict countdown in _tick()
+### What was done
+- Moved the Doom tick loop off the Kivy main thread onto a dedicated `doom-tick` background
+  thread. Key events are published via `queue.Queue`, drained each tick, and held/released
+  with a countdown in `_held`. This eliminated WiFi/SSH starvation caused by the tick
+  blocking Kivy's event loop.
+- Halved LCD SPI write rate: render only on `frame % 2 == 0` (~15fps) to reduce DMA
+  contention between the SPI controller and the WiFi SDIO bus on the RPi4.
+- Removed all diagnostic `fprintf` spam from `g_game.c` and `doom_api.c`.
+- Fixed "DOWN moves player forward" bug with three changes:
+  1. **cancel-opposite** (setup.py tick queue drain): when UP or DOWN arrives, immediately
+     release the opposite direction if it's still held. Prevents `gamekeydown[key_up]` and
+     `gamekeydown[key_down]` from both being true simultaneously.
+  2. **key_up on close** (setup.py `on_close()`): call `doom.key_up()` for every key still
+     in `_held` before clearing it. Previously the tick thread could exit mid-hold, leaving
+     `gamekeydown[KEY_UPARROW] = true` permanently in C until the next `G_InitNew`.
+  3. **key_speed = 0** (doom_api.c `doom_init()`): lock run-modifier key to 0 (never sent).
+     Default was `KEY_RSHIFT=182`; now always walk speed (`forwardmove[0]=25`).
+- Fixed copilot-instructions.md Memory file section: clarified append-only policy.
+- Committed: `d3314de`
 
-### Key architecture decisions
-- `singletics = true` set in `doom_init()` — makes all `NetUpdate()` calls no-ops
-- `doom_tick` uses singletics path: `I_StartTic → D_ProcessEvents → G_BuildTiccmd → M_Ticker → G_Ticker → gametic++ → maketic++`
-- `_tap(key, hold_ticks=2)` in setup.py: `key_down` immediately, `key_up` sent by `_tick()` when `_held[key]` countdown hits 0
-- `ubo_library_mode` guards wipe spin-wait and `NetUpdate` inside `D_Display`
-- `realtics` capped to 4 in `TryRunTics` (d_net.c) to prevent freeze after reset
-- `linebuffer` uses `sizeof(*linebuffer)` not `*4` — aarch64 64-bit pointer fix (p_setup.c)
-- Zone allocations aligned to 8 bytes for aarch64 (z_zone.c)
-- GS_LEVEL = 0 (confirmed from logs)
-- KEY_RCTRL = 0x9d = 157
-- SLOWTURNTICS = 10 in g_game.c → must hold for >10 ticks for full turn speed
+### Pending
+- User confirmation that movement is fixed on device.
 
-### UboKey enum (doom_api.h + doom_lib.py)
-- UBO_KEY_UP=1 → KEY_UPARROW
-- UBO_KEY_DOWN=2 → KEY_DOWNARROW
-- UBO_KEY_LEFT=3 → KEY_LEFTARROW
-- UBO_KEY_RIGHT=4 → KEY_RIGHTARROW
-- UBO_KEY_FIRE=5 → KEY_RCTRL (fire weapon in-game)
-- UBO_KEY_USE=6 → Space
-- UBO_KEY_ESCAPE=7 → KEY_ESCAPE
-- UBO_KEY_MENU_SELECT=8 → KEY_ENTER (for menu navigation only)
+---
 
-### Exported C functions (doom_api.c / doom_api.h)
-- doom_init, doom_tick, doom_shutdown
-- doom_key_down, doom_key_up
-- doom_get_rgba_ptr, doom_get_rgba_width, doom_get_rgba_height
-- doom_is_alive, doom_reset
-- doom_get_gamestate() → int (0=GS_LEVEL, 1=GS_INTERMISSION, 2=GS_FINALE, 3=GS_DEMOSCREEN)
-- doom_get_menuactive() → int (1 if menu overlay active)
+## 2026-02-23T12:14:37-0800 (789e17f..533df66) — Fire button; key bindings; context-aware BACK
 
-### File locations
-- C source: `third_party/DOOM-master/linuxdoom-1.10/`
-- Python service: `ubo_service/070-doom/`
-- Build scripts: `native/scripts/`
-- Library output (on device): `~/doom/libubodoom.so`
+### What was done
+- **Diagnosed fire button failure**: `#define HU_MSGREFRESH KEY_ENTER` in `hu_stuff.h` —
+  `HU_Responder` consumed every `KEY_ENTER` before it reached `G_Responder`/`gamekeydown`.
+- Fixed fire: mapped `UBO_KEY_FIRE` → `KEY_RCTRL` (0x9d=157).
+- Fixed stale key bindings from `~/.doomrc` on device (had `key_right=0`, `key_left=0`):
+  force `key_fire/right/left/up/down` in `doom_init()` after `D_DoomMain()`. Deleted `~/.doomrc`.
+- Added `hold_ticks` param to `_tap()`. L2/L3 use `hold_ticks=12` to exceed `SLOWTURNTICS=10`.
+- Fixed menu regression (RCTRL doesn't select menu items):
+  - Added `UBO_KEY_MENU_SELECT=8` → `KEY_ENTER` (safe in menus; `HU_MSGREFRESH` only
+    intercepts KEY_ENTER when a HUD refresh message is active).
+  - Added `doom_get_gamestate()` and `doom_get_menuactive()` to `doom_api.c/h` and `doom_lib.py`.
+  - Made `go_back()` context-aware: `GS_LEVEL + !menuactive` → FIRE; else MENU_SELECT.
+- Doom reaches game screen; player can fire weapon.
+- Committed: `ce93461` (fire fix), `533df66` (context-aware BACK)
 
-### Diagnostics still present (cleanup needed)
-- `fprintf` in doom_api.c `doom_key_down`/`doom_key_up` — logs ubo_key and doom_key to stderr
-- `fprintf` in g_game.c `G_Responder` — logs every keydown with gamestate/menuactive
-- `fprintf` in g_game.c `G_BuildTiccmd` — logs every 30 ticks + FIRE detection
-- These are intentional for now; remove once controls are confirmed stable
+---
 
+## 2026-02-23T11:33:28-0800 (a890969) — First working game screen on aarch64
 
-### Next debugging step — fire button
-Hypothesis: `G_BuildTiccmd` may be called before key events from the previous Python `_tap()` call are processed, or the events are being consumed. 
+### What was done
+- Doom initialises cleanly from `libubodoom.so` and reaches title screen.
+- Pressing BACK ×3 navigates menus and loads E1M1 without crashing.
+- Game screen renders; player POV with weapon visible; game loop runs at 30fps.
+- **64-bit aarch64 porting fixes** applied:
+  - `z_zone.c`: align allocations to 8 bytes (was 4) for aarch64 pointer alignment.
+  - `p_setup.c`: `P_GroupLines` linebuffer alloc uses `sizeof(*linebuffer)` not `*4`.
+  - `i_system.c`: `mb_used` default 16 → 32 MB.
+  - `R_InitColormaps`: cast to `(byte*)` not `(int)` — pointer truncation on 64-bit.
+  - Multiple SIGSEGV fixes in `R_Init*` texture loading.
+- **Library mode robustness**:
+  - `I_Error`: replaced `exit()` with `setjmp/longjmp` (`ubo_error_jmp`).
+  - `SIGSEGV/SIGBUS`: caught with `sigsetjmp` in `doom_tick()`; engine marked dead; host stays alive.
+  - `doom_init()` runs `D_DoomMain` on a background thread (avoids freezing Kivy UI).
+  - `d_net.c`: cap `realtics` to 4 to prevent freeze spike after `doom_reset`.
+  - `d_main.c`: skip `NetUpdate()` and wipe spin-wait in library mode (`ubo_library_mode`).
+  - `singletics = true` set in `doom_init()` — all `NetUpdate()` calls become no-ops.
+  - Tick path: `I_StartTic → D_ProcessEvents → G_BuildTiccmd → M_Ticker → G_Ticker`.
+  - `doom_reset()` clears `wadfiles[]`, `gametic`, `maketic`.
+- Fire still broken (KEY_ENTER stolen by HU_MSGREFRESH — fixed in session 2).
+- Committed: `a890969`
 
-Plan:
-1. Add `fprintf(stderr, "[doom] G_BuildTiccmd: gamekeydown[%d]=%d\n", key_fire, gamekeydown[key_fire])` to `G_BuildTiccmd` in g_game.c to confirm whether the key is ever seen
-2. Check if `gamestate == GS_LEVEL` when in-game (G_Responder at line 535 checks this)
-3. Check `menuactive` value when BACK is pressed (M_Responder consumes KEY_ENTER when menuactive=1)
-4. Verify `go_back()` in setup.py returns True — prevents UboPageWidget from navigating away, but does it also block the event from reaching doom?
+---
 
-### Diagnostic code still present (to remove when fire is fixed)
-- `p_setup.c`: `Z_CheckHeap()` + `fprintf` after each `P_Load*` call, `#include <stdio.h>`
-- `z_zone.c`: `fprintf(stderr, "[doom] Z_Init: ...")` in `Z_Init`, `#include <stdio.h>`
+## 2026-02-22T20:10:27-0800 (53e5b84..c4abb5e) — Audio fixes; stability improvements
 
-### Key mappings (from doom_api.c / setup.py)
-```
-UboKey.UP      → KEY_UPARROW  (movement)
-UboKey.DOWN    → KEY_DOWNARROW
-UboKey.L2      → KEY_RIGHTARROW (strafe/turn right)
-UboKey.L3      → KEY_LEFTARROW
-UboKey.FIRE    → KEY_ENTER (= key_fire default = 13)
-BACK button    → calls go_back() → _tap(UboKey.FIRE)
-```
+### What was done
+- Fixed silent audio: `I_UpdateSound()` was guarded by `SNDINTR` (never defined).
+  Now called unconditionally in `doom_tick()`.
+- Fixed `Z_Malloc OOM`: zone heap 6 MB → 16 MB for aarch64 (8-byte pointers in zone blocks).
+- Fixed audio mute regression: removed OUTPUT channel mute from `setup.py` (was silencing Doom's ALSA).
+- Removed `doom_shutdown()` call on navigation away — engine cannot be re-initialised mid-process.
+- Fixed unmute ordering: unmute only after `doom_init()` succeeds.
+- Fixed 64-bit ALSA struct layout and SNDSERV detection in `doom_init()`.
+- Pre-cached all SFX in `I_InitSound()` to avoid per-tick file I/O.
+- Committed: `53e5b84`, `a6014d9`, `81ab351`, `2b93301`, `92f4933`, `e33bf9f`, `c4abb5e`
 
-### Build + deploy commands
-```bash
-# Build on host (cross-compile or on device)
-cd native && ./scripts/build_libubodoom.sh
+---
 
-# Deploy
-scp native/build/libubodoom.so pi@192.168.88.112:~/
-ssh pi@192.168.88.112 "sudo cp ~/libubodoom.so /opt/ubo/lib/ && sudo systemctl restart ubo-app"
-```
+## 2026-02-21T07:31:35-0800 (bb76fbc..165b8aa) — Service scaffolding; on-device build; initial port
+
+### What was done
+- Scaffolded `ubo_service/070-doom/` service: `setup.py`, `native/doom_lib.py`, `__init__.py`.
+- Fixed Python service discovery: `sys.path` insert, `format_exc` logging, symlink deploy.
+- Fixed service name: `ubo-app` not `ubo_app` (systemd uses hyphen).
+- Rewrote README for on-device workflow (no cross-compilation). Added `build_on_device.sh`.
+- Replaced patch-based build with pre-modified `third_party/` source tree.
+- Committed: `8def516` through `a890969` (many small commits)
+
+---
+
+## 2026-02-18T14:21:29-0800 (c0c4343..973d54b) — Project initialised
+
+- Initial commit: project structure, LICENSES, README skeleton. Added `.gitignore`.
+- Committed: `c0c4343`, `058870b`, `973d54b`
+
+---
+
+## Reference: current device / key values
+
+- Device: aarch64 RPi4, `ubo@192.168.88.112` (use IP when Doom running — mDNS unreliable under load)
+- Deploy C+Python: `./native/scripts/build_on_device.sh ubo@192.168.88.112`
+- Deploy Python only: `rsync -avz ubo_service/070-doom/ ubo@192.168.88.112:~/ubo_services/070-doom/`
+- Restart: `ssh ubo@192.168.88.112 'systemctl --user restart ubo-app'`
+- Logs: `ssh ubo@192.168.88.112 'tail -f /tmp/ubo-app.log'`
+- KEY_UPARROW=0xad=173, KEY_DOWNARROW=0xaf=175, KEY_LEFTARROW=0xac=172, KEY_RIGHTARROW=0xae=174
+- KEY_RCTRL=0x9d=157, KEY_ENTER=0x0d=13
+- NUMKEYS=256, forwardmove[0]=25 (walk), forwardmove[1]=50 (run, disabled)
+- SLOWTURNTICS=10 → use hold_ticks=12 for full turn speed
+- GS_LEVEL=0, GS_INTERMISSION=1, GS_FINALE=2, GS_DEMOSCREEN=3
+- UboKey: UP=1→UPARROW, DOWN=2→DOWNARROW, LEFT=3→LEFTARROW, RIGHT=4→RIGHTARROW,
+          FIRE=5→RCTRL, USE=6→Space, ESCAPE=7→ESC, MENU_SELECT=8→ENTER

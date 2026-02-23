@@ -150,9 +150,7 @@ void doom_tick(void)
 
     D_Display();
 
-#ifdef SNDINTR
     I_UpdateSound();
-#endif
     I_SubmitSound();
 }
 

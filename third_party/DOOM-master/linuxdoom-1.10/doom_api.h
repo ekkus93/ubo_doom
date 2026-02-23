@@ -26,7 +26,8 @@ typedef enum ubo_key_e {
     UBO_KEY_RIGHT = 4,
     UBO_KEY_FIRE = 5,     // maps to KEY_RCTRL (Ctrl) — KEY_ENTER avoided: stolen by HU_MSGREFRESH
     UBO_KEY_USE = 6,      // maps to Space
-    UBO_KEY_ESCAPE = 7,   // maps to Esc
+    UBO_KEY_ESCAPE = 7,        // maps to Esc
+    UBO_KEY_MENU_SELECT = 8,  // maps to KEY_ENTER — only safe for menus, not in-game
 } ubo_key_t;
 
 void doom_key_down(ubo_key_t key);
@@ -43,6 +44,10 @@ int doom_is_alive(void);
 // Reset engine state so doom_init() can be called again after a mid-tick crash.
 // NOTE: leaks the old zone heap allocation — acceptable for a crash recovery path.
 void doom_reset(void);
+
+// Query current engine state (useful for context-sensitive input mapping).
+int doom_get_gamestate(void);   // 0=GS_LEVEL, 1=GS_INTERMISSION, 2=GS_FINALE, 3=GS_DEMOSCREEN
+int doom_get_menuactive(void);  // 1 if menu overlay is active, 0 otherwise
 
 #ifdef __cplusplus
 }

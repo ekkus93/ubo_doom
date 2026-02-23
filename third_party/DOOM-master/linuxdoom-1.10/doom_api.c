@@ -89,6 +89,7 @@ static int map_ubo_key(ubo_key_t key)
         case UBO_KEY_FIRE: return KEY_RCTRL;
         case UBO_KEY_USE: return ' ';
         case UBO_KEY_ESCAPE: return KEY_ESCAPE;
+        case UBO_KEY_MENU_SELECT: return KEY_ENTER;
         default: return 0;
     }
 }
@@ -281,6 +282,8 @@ const uint8_t* doom_get_rgba_ptr(void) { return ubo_rgba; }
 int doom_get_rgba_width(void) { return 320; }
 int doom_get_rgba_height(void) { return 200; }
 int doom_is_alive(void) { return g_inited == 1; }
+int doom_get_gamestate(void) { return (int)gamestate; }
+int doom_get_menuactive(void) { return menuactive ? 1 : 0; }
 
 void doom_reset(void)
 {

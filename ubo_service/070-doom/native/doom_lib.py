@@ -30,6 +30,7 @@ class UboKey(IntEnum):
     FIRE = 5
     USE = 6
     ESCAPE = 7
+    MENU_SELECT = 8  # maps to KEY_ENTER — only safe for menus (not in-game: stolen by HU_MSGREFRESH)
 
 
 @dataclass(frozen=True)
@@ -90,6 +91,14 @@ class DoomLib:
         self._lib.doom_reset.argtypes = []
         self._lib.doom_reset.restype = None
 
+        # int doom_get_gamestate(void);  0=GS_LEVEL, 1=GS_INTERMISSION, 2=GS_FINALE, 3=GS_DEMOSCREEN
+        self._lib.doom_get_gamestate.argtypes = []
+        self._lib.doom_get_gamestate.restype = ctypes.c_int
+
+        # int doom_get_menuactive(void);  1 if menu overlay active
+        self._lib.doom_get_menuactive.argtypes = []
+        self._lib.doom_get_menuactive.restype = ctypes.c_int
+
         # const uint8_t* doom_get_rgba_ptr(void);
         self._lib.doom_get_rgba_ptr.argtypes = []
         self._lib.doom_get_rgba_ptr.restype = ctypes.POINTER(ctypes.c_uint8)
@@ -135,6 +144,17 @@ class DoomLib:
 
     def is_alive(self) -> bool:
         return bool(self._lib.doom_is_alive())
+
+    def gamestate(self) -> int:
+        """Return current gamestate integer.
+
+        Values: 0=GS_LEVEL (in game), 1=GS_INTERMISSION, 2=GS_FINALE, 3=GS_DEMOSCREEN.
+        """
+        return int(self._lib.doom_get_gamestate())
+
+    def menuactive(self) -> bool:
+        """Return True if the Doom menu overlay is currently active."""
+        return bool(self._lib.doom_get_menuactive())
 
     def reset(self) -> None:
         """Clear engine state so doom_init() can be called again after a crash."""

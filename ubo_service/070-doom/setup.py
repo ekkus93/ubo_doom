@@ -220,9 +220,22 @@ class DoomPage(UboPageWidget):
         self._tap(UboKey.LEFT if self._alt_mode else UboKey.UP)
 
     def go_back(self) -> bool:
-        # Intercept BACK so it fires instead of exiting Doom.
-        print(f"[doom] go_back called, alt_mode={self._alt_mode}", flush=True)
-        self._tap(UboKey.FIRE)
+        # Intercept BACK so it never exits Doom.
+        # * In-game (GS_LEVEL=0) with no menu overlay → fire weapon (KEY_RCTRL).
+        # * In menu, intermission, demo-screen, or any other state → send KEY_ENTER
+        #   so the player can navigate and confirm menu selections.
+        in_level = (
+            self._doom is not None
+            and self._doom.is_alive()
+            and self._doom.gamestate() == 0  # GS_LEVEL
+            and not self._doom.menuactive()
+        )
+        key = UboKey.FIRE if in_level else UboKey.MENU_SELECT
+        print(
+            f"[doom] go_back: in_level={in_level}, alt_mode={self._alt_mode}, key={key.name}",
+            flush=True,
+        )
+        self._tap(key)
         return True
 
     def _make_items(self) -> list:

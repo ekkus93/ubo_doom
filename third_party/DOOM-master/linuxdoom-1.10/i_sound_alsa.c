@@ -732,8 +732,32 @@ I_InitSound()
    * this file is the ALSA replacement.  The sndserver globals (sndserver,
    * sndserver_filename) are still defined above (inside #ifdef SNDSERV) to
    * satisfy references from m_misc.c; we just skip launching the process. */
+  int i;
   int err;
   if (audio_pcm) return;
+
+  /* Pre-cache all sound effects from the WAD into S_sfx[i].data.
+   * Without this, S_StartSoundAtVolume finds sfx->data == NULL and
+   * prints "16bit and not pre-cached" for every sound. */
+  fprintf(stderr, "I_InitSound: pre-caching sound data...\n");
+  for (i = 1; i < NUMSFX; i++)
+  {
+    if (!S_sfx[i].link)
+    {
+      S_sfx[i].data = getsfx(S_sfx[i].name, &lengths[i]);
+    }
+    else
+    {
+      /* Alias — e.g. chaingun reuses pistol sample. */
+      S_sfx[i].data  = S_sfx[i].link->data;
+      lengths[i]     = lengths[S_sfx[i].link - S_sfx];
+    }
+  }
+  fprintf(stderr, "I_InitSound: pre-cached all sound data\n");
+
+  /* Zero the mix buffer. */
+  for (i = 0; i < MIXBUFFERSIZE; i++)
+    mixbuffer[i] = 0;
 
   err = snd_pcm_open(&audio_pcm, "default", SND_PCM_STREAM_PLAYBACK, 0);
   if (err < 0)

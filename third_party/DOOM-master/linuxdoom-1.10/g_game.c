@@ -1572,9 +1572,23 @@ void G_BeginRecording (void)
 //
 
 char*	defdemoname; 
- 
+
+extern int ubo_library_mode;
+extern int pagetic;
+
 void G_DeferedPlayDemo (char* name) 
-{ 
+{
+    // In library (ubo) mode the WAD demos are from a different version and
+    // cannot be played.  Skip silently: stay on the title screen instead of
+    // queuing ga_playdemo, which would cause a version-mismatch error every
+    // ~11 seconds and eventually corrupt pagename/pagetic state.
+    if (ubo_library_mode)
+    {
+        gamestate = GS_DEMOSCREEN;
+        pagename = "TITLEPIC";
+        pagetic = 35 * 11;
+        return;
+    }
     defdemoname = name; 
     gameaction = ga_playdemo; 
 } 
@@ -1590,6 +1604,7 @@ void G_DoPlayDemo (void)
     {
       fprintf( stderr, "Demo is from a different game version!\n");
       gameaction = ga_nothing;
+      D_AdvanceDemo ();  // skip to next title sequence instead of leaving a half-state
       return;
     }
     

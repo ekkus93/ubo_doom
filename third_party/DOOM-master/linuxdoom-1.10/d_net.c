@@ -648,6 +648,11 @@ void TryRunTics (void)
     entertic = I_GetTime ()/ticdup;
     realtics = entertic - oldentertics;
     oldentertics = entertic;
+
+    // Cap to prevent a freeze spike after a reset or frame-rate drop.
+    // Standard practice in all Doom source ports.
+    if (realtics > 4)
+	realtics = 4;
     
     // get available tics
     NetUpdate ();

@@ -316,7 +316,12 @@ void D_Display (void)
 
     // menus go directly to the screen
     M_Drawer ();          // menu is drawn even on top of everything
-    NetUpdate ();         // send out any new accumulation
+
+    // In library mode, skip NetUpdate: it would advance maketic ahead of
+    // gametic, causing G_Ticker to read stale ticcmds that don't contain
+    // the current frame's inputs.
+    if (!ubo_library_mode)
+	NetUpdate ();         // send out any new accumulation
 
 
     // normal update
@@ -325,7 +330,18 @@ void D_Display (void)
 	I_FinishUpdate ();              // page flip or blit buffer
 	return;
     }
-    
+
+    // In library mode, skip the wipe spin-wait entirely: it busy-loops on
+    // I_GetTime() and blocks the Kivy main thread for ~1 second per
+    // gamestate transition, which prevents button events from being processed
+    // and delays key_up past the point where G_BuildTiccmd can see the key.
+    if (ubo_library_mode)
+    {
+	// Just blit; the wipe visual is skipped.
+	I_FinishUpdate ();
+	return;
+    }
+
     // wipe update
     wipe_EndScreen(0, 0, SCREENWIDTH, SCREENHEIGHT);
 

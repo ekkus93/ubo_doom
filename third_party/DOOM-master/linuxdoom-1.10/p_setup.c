@@ -27,6 +27,7 @@ rcsid[] = "$Id: p_setup.c,v 1.5 1997/02/03 22:45:12 b1 Exp $";
 
 
 #include <math.h>
+#include <stdio.h>
 
 #include "z_zone.h"
 
@@ -532,8 +533,10 @@ void P_GroupLines (void)
 	}
     }
 	
-    // build line tables for each sector	
-    linebuffer = Z_Malloc (total*4, PU_LEVEL, 0);
+    // build line tables for each sector
+    // NOTE: original code used total*4 (sizeof(line_t*) on 32-bit DOS).
+    // On 64-bit, sizeof(line_t*)=8, so we must use sizeof(*linebuffer).
+    linebuffer = Z_Malloc (total*sizeof(*linebuffer), PU_LEVEL, 0);
     sector = sectors;
     for (i=0 ; i<numsectors ; i++, sector++)
     {
@@ -646,22 +649,46 @@ P_SetupLevel
     leveltime = 0;
 	
     // note: most of this ordering is important	
+    fprintf(stderr, "[doom] P_SetupLevel: before P_LoadBlockMap\n");
     P_LoadBlockMap (lumpnum+ML_BLOCKMAP);
+    Z_CheckHeap();
+    fprintf(stderr, "[doom] P_SetupLevel: after P_LoadBlockMap\n");
     P_LoadVertexes (lumpnum+ML_VERTEXES);
+    Z_CheckHeap();
+    fprintf(stderr, "[doom] P_SetupLevel: after P_LoadVertexes\n");
     P_LoadSectors (lumpnum+ML_SECTORS);
+    Z_CheckHeap();
+    fprintf(stderr, "[doom] P_SetupLevel: after P_LoadSectors\n");
     P_LoadSideDefs (lumpnum+ML_SIDEDEFS);
+    Z_CheckHeap();
+    fprintf(stderr, "[doom] P_SetupLevel: after P_LoadSideDefs\n");
 
     P_LoadLineDefs (lumpnum+ML_LINEDEFS);
+    Z_CheckHeap();
+    fprintf(stderr, "[doom] P_SetupLevel: after P_LoadLineDefs\n");
     P_LoadSubsectors (lumpnum+ML_SSECTORS);
+    Z_CheckHeap();
+    fprintf(stderr, "[doom] P_SetupLevel: after P_LoadSubsectors\n");
     P_LoadNodes (lumpnum+ML_NODES);
+    Z_CheckHeap();
+    fprintf(stderr, "[doom] P_SetupLevel: after P_LoadNodes\n");
     P_LoadSegs (lumpnum+ML_SEGS);
+    Z_CheckHeap();
+    fprintf(stderr, "[doom] P_SetupLevel: after P_LoadSegs\n");
 	
     rejectmatrix = W_CacheLumpNum (lumpnum+ML_REJECT,PU_LEVEL);
+    Z_CheckHeap();
+    fprintf(stderr, "[doom] P_SetupLevel: after ML_REJECT\n");
     P_GroupLines ();
+    Z_CheckHeap();
+    fprintf(stderr, "[doom] P_SetupLevel: after P_GroupLines\n");
 
     bodyqueslot = 0;
     deathmatch_p = deathmatchstarts;
+    fprintf(stderr, "[doom] P_SetupLevel: before P_LoadThings\n");
     P_LoadThings (lumpnum+ML_THINGS);
+    Z_CheckHeap();
+    fprintf(stderr, "[doom] P_SetupLevel: after P_LoadThings\n");
     
     // if deathmatch, randomly spawn the active players
     if (deathmatch)

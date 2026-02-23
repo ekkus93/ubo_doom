@@ -16,12 +16,18 @@ Audio:
 - This service mutes ubo_app OUTPUT while Doom runs to reduce contention.
 
 Input:
-- Uses ubo_app menu button mechanics:
-  - UP/DOWN => forward/back (tap)
-  - L1 => fire (tap)
-  - L2 => use (tap)
-  - L3 => escape/menu (tap)
-  - BACK => exit (handled by ubo navigation / menu stack)
+- Uses ubo_app menu button mechanics with a two-mode toggle:
+  Normal mode (default):
+    - UP => forward, DOWN => backward
+    - L1 => toggle to ALT mode
+    - L2 => turn left, L3 => turn right
+    - BACK => fire (intercepted; stays in Doom)
+  ALT mode (L1 toggled):
+    - UP => turn left, DOWN => turn right
+    - L1 => toggle back to normal mode
+    - L2 => use, L3 => escape/menu
+    - BACK => fire (always)
+  HOME => exit Doom (handled by ubo; always active)
 
 Environment:
 - UBO_DOOM_LIB  : path to libubodoom.so (default: ~/doom/libubodoom.so)
@@ -54,7 +60,7 @@ from kivy.clock import Clock
 from ubo_gui.menu.types import ActionItem
 
 from ubo_app.display import display as lcd_display
-from ubo_app.store.core.types import RegisterRegularAppAction
+from ubo_app.store.core.types import CloseApplicationEvent, RegisterRegularAppAction
 from ubo_app.store.main import store
 from ubo_app.store.services.display import DisplayPauseAction, DisplayResumeAction
 from ubo_app.store.ubo_actions import UboApplicationItem
@@ -143,15 +149,9 @@ class DoomPage(UboPageWidget):
     """
 
     def __init__(self, **kwargs: object) -> None:
-        # Footer button mapping: L1/L2/L3 => choose index 0/1/2
-        kwargs.setdefault(
-            "items",
-            [
-                ActionItem(label="FIRE", icon="", action=self._btn_fire),
-                ActionItem(label="USE", icon="", action=self._btn_use),
-                ActionItem(label="MENU", icon="", action=self._btn_menu),
-            ],
-        )
+        self._alt_mode = False
+        # Footer: L1=mode toggle, L2/L3 depend on mode
+        kwargs.setdefault("items", self._make_items())
         super().__init__(**kwargs)
 
         self._fps = float(os.environ.get("UBO_DOOM_FPS", "30"))
@@ -190,6 +190,12 @@ class DoomPage(UboPageWidget):
         except Exception:
             print("[doom] DoomPage._init_doom FAILED:\n" + traceback.format_exc(), flush=True)
             store.dispatch(DisplayResumeAction())
+            # Close the DoomPage so ubo returns to the main menu instead of
+            # leaving a black screen with no way out.
+            _instance_id = self.id
+            Clock.schedule_once(
+                lambda _dt: store.dispatch(CloseApplicationEvent(application_instance_id=_instance_id)), 0
+            )
 
     def _start_tick(self) -> None:
         if self._evt is None:
@@ -199,30 +205,57 @@ class DoomPage(UboPageWidget):
     # Input mapping
     # ------------
     def go_up(self) -> None:
-        self._tap(UboKey.UP)
+        # Normal: forward.  ALT: turn left.
+        self._tap(UboKey.LEFT if self._alt_mode else UboKey.UP)
 
     def go_down(self) -> None:
-        self._tap(UboKey.DOWN)
+        # Normal: backward.  ALT: turn right.
+        self._tap(UboKey.RIGHT if self._alt_mode else UboKey.DOWN)
 
-    def go_left(self) -> None:  # if ubo routes it
-        self._tap(UboKey.LEFT)
-
-    def go_right(self) -> None:  # if ubo routes it
-        self._tap(UboKey.RIGHT)
-
-    def _btn_fire(self) -> None:
+    def go_back(self) -> bool:
+        # Intercept BACK so it fires instead of exiting Doom.
         self._tap(UboKey.FIRE)
+        return True
 
-    def _btn_use(self) -> None:
-        self._tap(UboKey.USE)
+    def _make_items(self) -> list:
+        """Build footer ActionItems for the current mode."""
+        if self._alt_mode:
+            return [
+                ActionItem(label="NRM", icon="", action=self._toggle_mode),
+                ActionItem(label="USE", icon="", action=self._btn_l2),
+                ActionItem(label="MENU", icon="", action=self._btn_l3),
+            ]
+        return [
+            ActionItem(label="ALT", icon="", action=self._toggle_mode),
+            ActionItem(label="◄", icon="", action=self._btn_l2),
+            ActionItem(label="►", icon="", action=self._btn_l3),
+        ]
 
-    def _btn_menu(self) -> None:
-        self._tap(UboKey.ESCAPE)
+    def _toggle_mode(self) -> None:
+        self._alt_mode = not self._alt_mode
+        self.items = self._make_items()
+
+    def _btn_l2(self) -> None:
+        # Normal: turn left.  ALT: use (open doors/switches).
+        self._tap(UboKey.USE if self._alt_mode else UboKey.LEFT)
+
+    def _btn_l3(self) -> None:
+        # Normal: turn right.  ALT: escape/menu.
+        self._tap(UboKey.ESCAPE if self._alt_mode else UboKey.RIGHT)
 
     def _tap(self, key: UboKey) -> None:
-        # Keypad is discrete presses; model as tap (down+up).
+        # Key-down now, key-up after 2 tics.
+        # In-game movement/fire use key *state* (is the key held?), checked by
+        # G_BuildTiccmd once per tic.  Firing key_down and key_up in the same
+        # Python call means both events are processed in the same D_ProcessEvents
+        # call and the net state seen by G_BuildTiccmd is "released".
+        # Delaying key_up by 2/fps seconds (≥2 tics) ensures at least one
+        # G_BuildTiccmd call sees the key held down.
+        if self._doom is None:
+            return
         self._doom.key_down(key)
-        self._doom.key_up(key)
+        Clock.schedule_once(lambda _dt: self._doom and self._doom.key_up(key),
+                            2.0 / self._fps)
 
     # ----------
     # Main loop
@@ -231,6 +264,21 @@ class DoomPage(UboPageWidget):
         if self._doom is None or self._video is None or self._rgba_view is None:
             return
         self._doom.tick()
+        # If I_Error or SIGSEGV fired mid-tick the engine marks itself dead.
+        # Stop the tick loop, reset the engine so it can be restarted next
+        # time the user opens Doom, and close the page cleanly.
+        if not self._doom.is_alive():
+            print("[doom] engine died mid-tick, stopping loop", flush=True)
+            self._doom.reset()
+            if self._evt is not None:
+                self._evt.cancel()
+                self._evt = None
+            store.dispatch(DisplayResumeAction())
+            _instance_id = self.id
+            Clock.schedule_once(
+                lambda _dt: store.dispatch(CloseApplicationEvent(application_instance_id=_instance_id)), 0
+            )
+            return
         rgb565_be = self._video.rgba_to_rgb565_be(self._rgba_view)
 
         # ubo_app display.render_block uses inclusive rectangle

@@ -37,6 +37,13 @@ const uint8_t* doom_get_rgba_ptr(void);
 int doom_get_rgba_width(void);
 int doom_get_rgba_height(void);
 
+// Returns 1 if the engine is healthy, 0 otherwise (init failed or died mid-tick).
+int doom_is_alive(void);
+
+// Reset engine state so doom_init() can be called again after a mid-tick crash.
+// NOTE: leaks the old zone heap allocation — acceptable for a crash recovery path.
+void doom_reset(void);
+
 #ifdef __cplusplus
 }
 #endif

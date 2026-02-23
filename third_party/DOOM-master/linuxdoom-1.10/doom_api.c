@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <execinfo.h>
 
 #include "doomdef.h"
 #include "doomstat.h"
@@ -17,6 +18,24 @@
 #include "i_sound.h"
 #include "i_video.h"
 #include "s_sound.h"
+
+// D_DoomLoop checks advancedemo each iteration; since we drive ticks manually
+// we need to mirror that check ourselves.
+extern boolean advancedemo;
+void D_DoAdvanceDemo(void);
+
+// maketic lives in d_net.c and isn't exported from d_net.h; reset it in
+// doom_reset() to avoid the NetUpdate: numtics > BACKUPTICS error on re-init.
+extern int maketic;
+extern int gametic;
+extern ticcmd_t netcmds[MAXPLAYERS][BACKUPTICS];
+
+// D_ProcessEvents, G_BuildTiccmd, M_Ticker, G_Ticker for the singletics path.
+void D_ProcessEvents(void);
+void G_BuildTiccmd(ticcmd_t* cmd);
+void G_Ticker(void);
+void M_Ticker(void);
+void D_Display(void);
 
 int ubo_library_mode = 0;
 
@@ -37,6 +56,13 @@ static volatile sig_atomic_t g_crash_jmp_valid = 0;
 
 static void doom_crash_handler(int sig)
 {
+    // Print a backtrace before longjmping — this is async-signal-safe enough
+    // for debugging purposes (backtrace/backtrace_symbols_fd use no malloc).
+    void *bt[32];
+    int n = backtrace(bt, 32);
+    fprintf(stderr, "[doom] SIGNAL %d — backtrace (%d frames):\n", sig, n);
+    backtrace_symbols_fd(bt, n, 2);  // fd 2 = stderr
+    fflush(stderr);
     (void)sig;
     if (g_crash_jmp_valid) {
         g_crash_jmp_valid = 0;
@@ -60,7 +86,7 @@ static int map_ubo_key(ubo_key_t key)
         case UBO_KEY_DOWN: return KEY_DOWNARROW;
         case UBO_KEY_LEFT: return KEY_LEFTARROW;
         case UBO_KEY_RIGHT: return KEY_RIGHTARROW;
-        case UBO_KEY_FIRE: return KEY_RCTRL;
+        case UBO_KEY_FIRE: return KEY_ENTER;
         case UBO_KEY_USE: return ' ';
         case UBO_KEY_ESCAPE: return KEY_ESCAPE;
         default: return 0;
@@ -76,6 +102,7 @@ int doom_init(const char* iwad_path)
     ubo_library_mode = 1;
 
     // Build a minimal argv: [ubodoom, -iwad, <path>]
+    // Zone heap size is controlled by mb_used in m_misc.c defaults (set to 32 MB).
     g_argc = 0;
     g_argv[g_argc++] = g_prog;
     g_argv[g_argc++] = (char*)"-iwad";
@@ -131,16 +158,64 @@ int doom_init(const char* iwad_path)
     sigaction(SIGSEGV, &sa_old_segv, NULL);
     sigaction(SIGBUS,  &sa_old_bus,  NULL);
     g_inited = 1;
+
+    // Re-install the crash handler permanently (without SA_RESETHAND) so that
+    // SIGSEGV/SIGBUS during doom_tick are also caught instead of killing ubo_app.
+    sa.sa_flags = 0;  // persistent, not one-shot
+    sigaction(SIGSEGV, &sa, NULL);
+    sigaction(SIGBUS,  &sa, NULL);
+
+    // In library mode we drive ticks manually (singletics path), so set the
+    // singletics flag.  This makes every NetUpdate() call in the engine
+    // (r_main.c, d_main.c, d_net.c) return immediately, preventing the
+    // "netbuffer->numtics > BACKUPTICS" I_Error after ~12 rendered frames.
+    extern boolean singletics;
+    singletics = true;
+
     return 0;
 }
 
 void doom_tick(void)
 {
-    if (!g_inited) return;
+    if (g_inited != 1) return;
 
-    // One "outer loop" iteration of D_DoomLoop().
+    // Arm the crash jump so SIGSEGV/SIGBUS and I_Error during the tick are
+    // caught here rather than killing the host process (ubo_app).
+    ubo_error_jmp_valid = 1;
+    g_crash_jmp_valid = 1;
+
+    if (sigsetjmp(g_crash_jmp, 1) != 0) {
+        // SIGSEGV or SIGBUS mid-tick.
+        g_crash_jmp_valid = 0;
+        ubo_error_jmp_valid = 0;
+        g_inited = -1;
+        fprintf(stderr, "[doom] doom_tick aborted via signal (SIGSEGV/SIGBUS)\n");
+        return;
+    }
+
+    if (setjmp(ubo_error_jmp) != 0) {
+        // I_Error mid-tick (e.g. Z_Malloc failure during level load).
+        g_crash_jmp_valid = 0;
+        ubo_error_jmp_valid = 0;
+        g_inited = -1;
+        fprintf(stderr, "[doom] doom_tick aborted via I_Error\n");
+        return;
+    }
+
+    // One "outer loop" iteration of D_DoomLoop(), singletics path.
+    // This mirrors d_main.c's singletics branch exactly: run 1 tic per
+    // doom_tick call with no spin-waits, so the Kivy main thread is never
+    // blocked waiting for real-time tics to accumulate.
     I_StartFrame();
-    TryRunTics();
+    I_StartTic();
+    D_ProcessEvents();
+    G_BuildTiccmd(&netcmds[consoleplayer][maketic%BACKUPTICS]);
+    if (advancedemo)
+        D_DoAdvanceDemo();
+    M_Ticker();
+    G_Ticker();
+    gametic++;
+    maketic++;
 
     // Position-based audio update.
     if (players[consoleplayer].mo)
@@ -152,6 +227,9 @@ void doom_tick(void)
 
     I_UpdateSound();
     I_SubmitSound();
+
+    g_crash_jmp_valid = 0;
+    ubo_error_jmp_valid = 0;
 }
 
 void doom_shutdown(void)
@@ -186,3 +264,27 @@ void doom_key_up(ubo_key_t key)
 const uint8_t* doom_get_rgba_ptr(void) { return ubo_rgba; }
 int doom_get_rgba_width(void) { return 320; }
 int doom_get_rgba_height(void) { return 200; }
+int doom_is_alive(void) { return g_inited == 1; }
+
+void doom_reset(void)
+{
+    // Allow doom_init() to run again after a mid-tick crash.
+    // The old zone heap leaks but all other globals will be re-initialised
+    // by the next D_DoomMain() call.
+    g_inited = 0;
+    ubo_error_jmp_valid = 0;
+    g_crash_jmp_valid = 0;
+
+    // Clear the WAD file list so D_AddFile() starts from index 0 on the next
+    // init — without this, each re-init appends the IWAD again and again,
+    // causing duplicate lump registrations.
+    memset(wadfiles, 0, sizeof(wadfiles));
+
+    // Reset tic counters to avoid NetUpdate: netbuffer->numtics > BACKUPTICS.
+    // gametic and maketic carry over from the crashed session and cause the
+    // net tic buffer difference check to immediately fire on the next run.
+    gametic = 0;
+    maketic = 0;
+
+    fprintf(stderr, "[doom] doom_reset: engine state cleared, ready for re-init\n");
+}

@@ -25,6 +25,7 @@ static const char
 rcsid[] = "$Id: z_zone.c,v 1.4 1997/02/03 16:47:58 b1 Exp $";
 
 #include "z_zone.h"
+#include <stdio.h>
 #include "i_system.h"
 #include "doomdef.h"
 
@@ -97,6 +98,9 @@ void Z_Init (void)
 
     mainzone = (memzone_t *)I_ZoneBase (&size);
     mainzone->size = size;
+
+    fprintf(stderr, "[doom] Z_Init: sizeof(memblock_t)=%zu sizeof(memzone_t)=%zu zone=%p size=%d\n",
+	    sizeof(memblock_t), sizeof(memzone_t), (void*)mainzone, size);
 
     // set the entire zone to one free block
     mainzone->blocklist.next =
@@ -192,8 +196,13 @@ Z_Malloc
     memblock_t* newblock;
     memblock_t*	base;
 
-    size = (size + 3) & ~3;
-    
+    // Align to 8 bytes (pointer alignment on 64-bit).
+    // Original code used 4-byte alignment which was sufficient for 32-bit DOS/Linux,
+    // but on aarch64 sizeof(memblock_t)=40 and pointer fields require 8-byte alignment.
+    // 4-byte-only alignment causes newblock to land at a misaligned address, corrupting
+    // the next/prev pointer fields of the carved-out block.
+    size = (size + 7) & ~7;
+
     // scan through the block list,
     // looking for the first free block
     // of sufficient size,

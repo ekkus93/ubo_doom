@@ -102,7 +102,7 @@ UBO_OBJS:=$(filter-out $(UBO_O)/i_sound.o $(UBO_O)/i_video.o,$(UBO_OBJS))
 UBO_OBJS+=$(UBO_O)/i_sound_alsa.o $(UBO_O)/i_video_ubo.o $(UBO_O)/doom_api.o
 
 libubodoom.so: $(UBO_OBJS)
-	$(CC) -shared -o $@ $(UBO_OBJS) $(UBO_LIBS)
+	$(CC) -shared -Wl,-export-dynamic -o $@ $(UBO_OBJS) $(UBO_LIBS)
 
 $(UBO_O):
 	mkdir -p $(UBO_O)

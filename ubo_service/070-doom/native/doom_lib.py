@@ -82,6 +82,14 @@ class DoomLib:
         self._lib.doom_key_up.argtypes = [ctypes.c_int]
         self._lib.doom_key_up.restype = None
 
+        # int doom_is_alive(void);
+        self._lib.doom_is_alive.argtypes = []
+        self._lib.doom_is_alive.restype = ctypes.c_int
+
+        # void doom_reset(void);
+        self._lib.doom_reset.argtypes = []
+        self._lib.doom_reset.restype = None
+
         # const uint8_t* doom_get_rgba_ptr(void);
         self._lib.doom_get_rgba_ptr.argtypes = []
         self._lib.doom_get_rgba_ptr.restype = ctypes.POINTER(ctypes.c_uint8)
@@ -124,6 +132,13 @@ class DoomLib:
 
     def key_up(self, key: UboKey | int) -> None:
         self._lib.doom_key_up(int(key))
+
+    def is_alive(self) -> bool:
+        return bool(self._lib.doom_is_alive())
+
+    def reset(self) -> None:
+        """Clear engine state so doom_init() can be called again after a crash."""
+        self._lib.doom_reset()
 
     def framebuffer_info(self) -> DoomFramebufferInfo:
         w = int(self._lib.doom_get_rgba_width())

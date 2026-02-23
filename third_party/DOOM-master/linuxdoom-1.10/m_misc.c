@@ -248,7 +248,7 @@ default_t	defaults[] =
     {"key_strafeleft",&key_strafeleft, ','},
     {"key_straferight",&key_straferight, '.'},
 
-    {"key_fire",&key_fire, KEY_RCTRL},
+    {"key_fire",&key_fire, KEY_ENTER},
     {"key_use",&key_use, ' '},
     {"key_strafe",&key_strafe, KEY_RALT},
     {"key_speed",&key_speed, KEY_RSHIFT},
@@ -256,7 +256,7 @@ default_t	defaults[] =
 // UNIX hack, to be removed. 
 #ifdef SNDSERV
     {"sndserver", (int *) &sndserver_filename, (intptr_t) "sndserver"},
-    {"mb_used", &mb_used, 2},
+    {"mb_used", &mb_used, 32},
 #endif
     
 #endif

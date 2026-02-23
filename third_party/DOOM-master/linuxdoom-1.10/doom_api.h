@@ -24,7 +24,7 @@ typedef enum ubo_key_e {
     UBO_KEY_DOWN = 2,
     UBO_KEY_LEFT = 3,
     UBO_KEY_RIGHT = 4,
-    UBO_KEY_FIRE = 5,     // maps to Ctrl
+    UBO_KEY_FIRE = 5,     // maps to KEY_RCTRL (Ctrl) — KEY_ENTER avoided: stolen by HU_MSGREFRESH
     UBO_KEY_USE = 6,      // maps to Space
     UBO_KEY_ESCAPE = 7,   // maps to Esc
 } ubo_key_t;

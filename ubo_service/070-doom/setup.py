@@ -211,12 +211,13 @@ class DoomPage(UboPageWidget):
     # Input mapping
     # ------------
     def go_up(self) -> None:
-        # Normal: forward.  ALT: turn left.
-        self._tap(UboKey.LEFT if self._alt_mode else UboKey.UP)
+        # Normal: backward.  ALT: turn right.
+        # (Physical UP button on Ubo is oriented as backward in Doom's frame.)
+        self._tap(UboKey.RIGHT if self._alt_mode else UboKey.DOWN)
 
     def go_down(self) -> None:
-        # Normal: backward.  ALT: turn right.
-        self._tap(UboKey.RIGHT if self._alt_mode else UboKey.DOWN)
+        # Normal: forward.  ALT: turn left.
+        self._tap(UboKey.LEFT if self._alt_mode else UboKey.UP)
 
     def go_back(self) -> bool:
         # Intercept BACK so it fires instead of exiting Doom.
@@ -244,22 +245,30 @@ class DoomPage(UboPageWidget):
 
     def _btn_l2(self) -> None:
         # Normal: turn left.  ALT: use (open doors/switches).
-        self._tap(UboKey.USE if self._alt_mode else UboKey.LEFT)
+        # 12-tick hold to exceed SLOWTURNTICS (10) for full-speed turning.
+        if self._alt_mode:
+            self._tap(UboKey.USE)
+        else:
+            self._tap(UboKey.LEFT, hold_ticks=12)
 
     def _btn_l3(self) -> None:
         # Normal: turn right.  ALT: escape/menu.
-        self._tap(UboKey.ESCAPE if self._alt_mode else UboKey.RIGHT)
+        if self._alt_mode:
+            self._tap(UboKey.ESCAPE)
+        else:
+            self._tap(UboKey.RIGHT, hold_ticks=12)
 
-    def _tap(self, key: UboKey) -> None:
+    def _tap(self, key: UboKey, hold_ticks: int = 2) -> None:
         # Post key_down immediately.  Key_up is sent in _tick after the held
-        # counter counts down to 0 — this guarantees at least 2 doom_tick calls
-        # see the key held before it's released, with no Clock timer race.
+        # counter counts down to 0 — this guarantees key_up is only sent AFTER
+        # doom_tick has run at least hold_ticks G_BuildTiccmd calls with the key
+        # held.  Use hold_ticks>=12 for turn keys to exceed SLOWTURNTICS (10).
         if self._doom is None:
             return
-        print(f"[doom] _tap: key={key}, doom_alive={self._doom.is_alive()}", flush=True)
+        print(f"[doom] _tap: key={key} hold={hold_ticks}, doom_alive={self._doom.is_alive()}", flush=True)
         if key not in self._held:
             self._doom.key_down(key)
-        self._held[key] = 2  # hold for 2 ticks
+        self._held[key] = hold_ticks  # (re)set countdown
 
     # ----------
     # Main loop

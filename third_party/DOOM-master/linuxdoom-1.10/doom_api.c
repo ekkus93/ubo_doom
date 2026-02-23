@@ -86,7 +86,7 @@ static int map_ubo_key(ubo_key_t key)
         case UBO_KEY_DOWN: return KEY_DOWNARROW;
         case UBO_KEY_LEFT: return KEY_LEFTARROW;
         case UBO_KEY_RIGHT: return KEY_RIGHTARROW;
-        case UBO_KEY_FIRE: return KEY_ENTER;
+        case UBO_KEY_FIRE: return KEY_RCTRL;
         case UBO_KEY_USE: return ' ';
         case UBO_KEY_ESCAPE: return KEY_ESCAPE;
         default: return 0;
@@ -171,6 +171,18 @@ int doom_init(const char* iwad_path)
     // "netbuffer->numtics > BACKUPTICS" I_Error after ~12 rendered frames.
     extern boolean singletics;
     singletics = true;
+
+    // Force key bindings to known-good values after M_LoadDefaults has run
+    // (as part of D_DoomMain above).  This overrides any stale/zeroed entries
+    // in ~/.doomrc such as key_right=0 and key_left=0 which would break turning.
+    // Also locks key_fire to KEY_RCTRL — KEY_ENTER is stolen by HU_MSGREFRESH
+    // (hu_stuff.h) and would be eaten before reaching G_Responder.
+    extern int key_fire, key_right, key_left, key_up, key_down;
+    key_fire  = KEY_RCTRL;
+    key_right = KEY_RIGHTARROW;
+    key_left  = KEY_LEFTARROW;
+    key_up    = KEY_UPARROW;
+    key_down  = KEY_DOWNARROW;
 
     return 0;
 }

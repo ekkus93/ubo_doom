@@ -259,9 +259,9 @@ void doom_tick(void)
         // G_BuildTiccmd (keyboard accel, mouse, joystick) so we can test
         // deterministic movement magnitudes on hardware.
         if (gamekeydown[key_up] && !gamekeydown[key_down]) {
-            cmd->forwardmove = 7;
+            cmd->forwardmove = 25;
         } else if (gamekeydown[key_down] && !gamekeydown[key_up]) {
-            cmd->forwardmove = -7;
+            cmd->forwardmove = -25;
         } else if (gamekeydown[key_up] && gamekeydown[key_down]) {
             cmd->forwardmove = 0;
         }

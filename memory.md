@@ -4,6 +4,20 @@
 
 ---
 
+## 2026-02-23 — Restore movement speed to +25/-25
+
+### Change
+- Updated movement experiment values back to faster defaults:
+  - `g_game.c` keyboard forward contribution: `+25/-25`
+  - `doom_api.c` deterministic post-build override: `cmd->forwardmove = 25/-25`
+
+### Context
+- User reported the logic appears correct and requested increased movement speed.
+- Signedness fix (`signed char` in `ticcmd_t`) remains in place to preserve negative values on this target.
+
+### Deploy
+- Rebuilt/deployed to `ubo@192.168.88.112` and restarted `ubo-app`.
+
 ## 2026-02-23 — Root cause confirmed: sign loss in `ticcmd_t.forwardmove`
 
 ### Finding

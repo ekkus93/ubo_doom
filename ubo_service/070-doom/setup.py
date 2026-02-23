@@ -56,7 +56,6 @@ from ubo_gui.menu.types import ActionItem
 from ubo_app.display import display as lcd_display
 from ubo_app.store.core.types import RegisterRegularAppAction
 from ubo_app.store.main import store
-from ubo_app.store.services.audio import AudioDevice, AudioSetMuteStatusAction
 from ubo_app.store.services.display import DisplayPauseAction, DisplayResumeAction
 from ubo_app.store.ubo_actions import UboApplicationItem
 from ubo_app.utils.gui import UboPageWidget
@@ -164,9 +163,10 @@ class DoomPage(UboPageWidget):
         self._lib_path = Path(os.environ.get("UBO_DOOM_LIB", str(Path.home() / "doom" / "libubodoom.so")))
         self._iwad_path = os.environ.get("UBO_DOOM_IWAD", str(Path.home() / "doom" / "doom2.wad"))
 
-        # Pause ubo display/audio eagerly so they don't interfere during init.
+        # Pause ubo display so it doesn't interfere with Doom's LCD output.
+        # We intentionally do NOT mute OUTPUT audio here — muting the hardware
+        # output device would silence Doom's own ALSA sound output too.
         store.dispatch(DisplayPauseAction())
-        store.dispatch(AudioSetMuteStatusAction(is_mute=True, device=AudioDevice.OUTPUT))
 
         # Init Doom in a background thread so the Kivy main thread isn't blocked.
         threading.Thread(target=self._init_doom, daemon=True).start()
@@ -185,16 +185,10 @@ class DoomPage(UboPageWidget):
             self._rgba_view = flat.reshape((fb.height, fb.width, 4))
             self._video = _VideoPipe.create(src_w=fb.width, src_h=fb.height)
 
-            # Unmute audio now that Doom owns the ALSA output.
-            # (It was muted above to prevent ubo_app audio during init.)
-            store.dispatch(AudioSetMuteStatusAction(is_mute=False, device=AudioDevice.OUTPUT))
-
             # Schedule tick start back on the Kivy main thread.
             Clock.schedule_once(lambda _dt: self._start_tick(), 0)
         except Exception:
             print("[doom] DoomPage._init_doom FAILED:\n" + traceback.format_exc(), flush=True)
-            # Reverse the eager pause/mute so ubo_app resumes normally.
-            store.dispatch(AudioSetMuteStatusAction(is_mute=False, device=AudioDevice.OUTPUT))
             store.dispatch(DisplayResumeAction())
 
     def _start_tick(self) -> None:
@@ -251,13 +245,12 @@ class DoomPage(UboPageWidget):
             self._evt.cancel()
             self._evt = None
 
-        # Restore ubo display and audio so the rest of the UI works normally
-        # while Doom is not visible.  We do NOT call doom_shutdown here because
-        # the Doom engine is not designed to be re-initialised within the same
-        # process (it re-adds WAD lumps and corrupts zone/tic state on second
-        # init).  Leaving it warm means re-entering Doom just restarts the tick
-        # loop and resumes from where the user left off.
-        store.dispatch(AudioSetMuteStatusAction(is_mute=False, device=AudioDevice.OUTPUT))
+        # Restore ubo display so the rest of the UI works normally while Doom
+        # is not visible.  We do NOT call doom_shutdown here because the Doom
+        # engine is not designed to be re-initialised within the same process
+        # (it re-adds WAD lumps and corrupts zone/tic state on second init).
+        # Leaving it warm means re-entering Doom just restarts the tick loop
+        # and resumes from where the user left off.
         store.dispatch(DisplayResumeAction())
 
 

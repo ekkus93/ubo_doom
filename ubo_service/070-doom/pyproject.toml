@@ -1,0 +1,6 @@
+[tool.pytest.ini_options]
+# Run from:  cd ubo_service/070-doom && pytest
+# or from workspace root: pytest ubo_service/070-doom/
+testpaths = ["tests"]
+pythonpath = ["."]      # adds ubo_service/070-doom/ so `from doom_controller import ...` works
+addopts    = "-v --tb=short"

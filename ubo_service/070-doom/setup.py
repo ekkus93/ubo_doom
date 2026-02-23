@@ -18,15 +18,17 @@ Audio:
 Input:
 - Uses ubo_app menu button mechanics with a two-mode toggle:
   Normal mode (default):
-    - UP => forward, DOWN => backward
-    - L1 => toggle to ALT mode
-    - L2 => turn left, L3 => turn right
-    - BACK => fire (intercepted; stays in Doom)
-  ALT mode (L1 toggled):
-    - UP => turn left, DOWN => turn right
+    - UP => forward, DOWN => backward  (always, in both modes)
+    - L1 => toggle to ALT mode  (in-game only; ignored in menus)
+    - L2 => turn left
+    - L3 => turn right (in-game) / confirm/select (in menus)
+    - BACK => fire (in-game, no menu) / escape/back (in menus) / enter (demo/intermission)
+  ALT mode (L1 toggled, in-game only):
+    - UP => forward, DOWN => backward  (unchanged)
     - L1 => toggle back to normal mode
     - L2 => use, L3 => escape/menu
     - BACK => fire (always)
+  ALT mode auto-resets to normal when leaving a level (entering menus/intermission).
   HOME => exit Doom (handled by ubo; always active)
 
 Environment:
@@ -73,6 +75,7 @@ from ubo_app.utils.gui import UboPageWidget
 _SERVICE_DIR = os.path.dirname(os.path.abspath(__file__))
 if _SERVICE_DIR not in sys.path:
     sys.path.insert(0, _SERVICE_DIR)
+from doom_controller import DoomController
 from native.doom_lib import DoomLib, UboKey
 
 
@@ -151,8 +154,11 @@ class DoomPage(UboPageWidget):
     """
 
     def __init__(self, **kwargs: object) -> None:
-        self._alt_mode = False
-        # Footer: L1=mode toggle, L2/L3 depend on mode
+        # _key_queue must exist before any _tap call; create it before _controller.
+        self._key_queue: queue.Queue[tuple[UboKey, int]] = queue.Queue()
+        # Controller owns all input-routing state; DoomPage is a thin shell.
+        self._controller = DoomController(tap_fn=self._tap)
+        # Footer: L1=mode toggle, L2/L3 depend on mode (alt_mode starts False).
         kwargs.setdefault("items", self._make_items())
         super().__init__(**kwargs)
 
@@ -160,13 +166,8 @@ class DoomPage(UboPageWidget):
         self._doom: DoomLib | None = None
         self._video: _VideoPipe | None = None
         self._rgba_view: "np.ndarray | None" = None
-        # Key events posted from the Kivy main thread, drained by the tick thread.
-        self._key_queue: queue.Queue[tuple[UboKey, int]] = queue.Queue()
         # Held-key countdown dict — only accessed by the tick thread.
         self._held: dict[UboKey, int] = {}
-        # Cached in-level state written by tick thread, read by go_back().
-        # Simple bool: GIL makes single-assignment reads/writes atomic in CPython.
-        self._in_level: bool = False
         # Stop signal and thread handle for the tick loop.
         self._stop_evt = threading.Event()
         self._thread: threading.Thread | None = None
@@ -220,53 +221,42 @@ class DoomPage(UboPageWidget):
     # Input mapping
     # ------------
     def go_up(self) -> None:
-        # Physical UP => forward in Doom (KEY_UPARROW).
-        self._tap(UboKey.UP)
+        self._controller.go_up()
 
     def go_down(self) -> None:
-        # Physical DOWN => backward in Doom (KEY_DOWNARROW).
-        self._tap(UboKey.DOWN)
+        self._controller.go_down()
 
     def go_back(self) -> bool:
-        # Intercept BACK so it never exits Doom.
-        # _in_level is kept current by the tick thread (GIL-safe bool).
-        # In-game with no menu → fire; anywhere else → KEY_ENTER for menu nav.
-        key = UboKey.FIRE if self._in_level else UboKey.MENU_SELECT
-        self._tap(key)
-        return True
+        return self._controller.go_back()
 
     def _make_items(self) -> list:
         """Build footer ActionItems for the current mode."""
-        if self._alt_mode:
+        if self._controller.alt_mode:
             return [
                 ActionItem(label="NRM", icon="", action=self._toggle_mode),
                 ActionItem(label="USE", icon="", action=self._btn_l2),
-                ActionItem(label="MENU", icon="", action=self._btn_l3),
+                ActionItem(label="ESC", icon="", action=self._btn_l3),
             ]
         return [
             ActionItem(label="ALT", icon="", action=self._toggle_mode),
             ActionItem(label="◄", icon="", action=self._btn_l2),
-            ActionItem(label="►", icon="", action=self._btn_l3),
+            ActionItem(label="►/OK", icon="", action=self._btn_l3),
         ]
 
     def _toggle_mode(self) -> None:
-        self._alt_mode = not self._alt_mode
-        self.items = self._make_items()
+        if self._controller.toggle_mode():
+            self.items = self._make_items()
+
+    def _exit_level(self) -> None:
+        """Called on Kivy main thread when the game leaves GS_LEVEL."""
+        if self._controller.exit_level():
+            self.items = self._make_items()
 
     def _btn_l2(self) -> None:
-        # Normal: turn left.  ALT: use (open doors/switches).
-        # 12-tick hold to exceed SLOWTURNTICS (10) for full-speed turning.
-        if self._alt_mode:
-            self._tap(UboKey.USE)
-        else:
-            self._tap(UboKey.LEFT, hold_ticks=12)
+        self._controller.btn_l2()
 
     def _btn_l3(self) -> None:
-        # Normal: turn right.  ALT: escape/menu.
-        if self._alt_mode:
-            self._tap(UboKey.ESCAPE)
-        else:
-            self._tap(UboKey.RIGHT, hold_ticks=12)
+        self._controller.btn_l3()
 
     def _tap(self, key: UboKey, hold_ticks: int = 2) -> None:
         # Non-blocking: enqueue the event for the tick thread to process.
@@ -288,6 +278,10 @@ class DoomPage(UboPageWidget):
 
         interval = 1.0 / self._fps
         frame = 0
+        _MOVEMENT_OPPOSITE: dict[UboKey, UboKey] = {
+            UboKey.UP: UboKey.DOWN,
+            UboKey.DOWN: UboKey.UP,
+        }
         while not self._stop_evt.is_set():
             t0 = time.monotonic()
 
@@ -295,6 +289,13 @@ class DoomPage(UboPageWidget):
             while True:
                 try:
                     key, hold_ticks = self._key_queue.get_nowait()
+                    # Cancel the opposite movement direction immediately so
+                    # a lingering hold_ticks countdown can't cause both UP
+                    # and DOWN to be active in gamekeydown simultaneously.
+                    opposite = _MOVEMENT_OPPOSITE.get(key)
+                    if opposite is not None and opposite in self._held:
+                        doom.key_up(opposite)
+                        del self._held[opposite]
                     if key not in self._held:
                         doom.key_down(key)
                     self._held[key] = hold_ticks  # (re)set countdown
@@ -313,12 +314,17 @@ class DoomPage(UboPageWidget):
             doom.tick()
             frame += 1
 
-            # Update cached state for go_back() on the main thread.
-            self._in_level = (
-                doom.is_alive()
-                and doom.gamestate() == 0  # GS_LEVEL
-                and not doom.menuactive()
+            # Update controller's cached state (tick thread → main-thread reads).
+            # update_game_state() returns True when the game just left a level,
+            # which triggers an exit_level() call on the Kivy main thread.
+            alive = doom.is_alive()
+            just_left_level = self._controller.update_game_state(
+                alive=alive,
+                gamestate=doom.gamestate() if alive else -1,
+                menuactive=bool(doom.menuactive()) if alive else False,
             )
+            if just_left_level:
+                Clock.schedule_once(lambda _dt: self._exit_level(), 0)
 
             # If I_Error or SIGSEGV fired mid-tick the engine marks itself dead.
             if not doom.is_alive():
@@ -356,6 +362,14 @@ class DoomPage(UboPageWidget):
         if self._thread is not None:
             self._thread.join(timeout=1.0)
             self._thread = None
+        # Release every held key in Doom before clearing our tracking dict.
+        # The tick thread may have exited while a key was still held, leaving
+        # gamekeydown[key] = true in the C engine permanently.  Sending
+        # key_up() for each held key here resets that state so re-entering
+        # Doom doesn't inherit stale pressed keys (e.g. perpetual UP/forward).
+        if self._doom is not None:
+            for key in list(self._held):
+                self._doom.key_up(key)
         self._held.clear()
         # Drain any queued key events so they don't linger across re-opens.
         while not self._key_queue.empty():

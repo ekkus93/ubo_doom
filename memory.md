@@ -4,6 +4,38 @@
 
 ---
 
+## 2026-02-23 — Extract DoomController; add unit tests; fix menuactive() race condition
+
+### Root causes fixed
+- **Race condition in go_back() / _btn_l3()**: both were calling `doom.menuactive()` directly
+  from the Kivy main thread, which races with the tick thread. Fixed by caching `_menu_active`
+  in `update_game_state()` (tick thread only) and reading only the cached value on the main thread.
+- **No unit tests**: all control logic was embedded in `DoomPage` (Kivy + ctypes + ubo_app),
+  making it impossible to test without the full device stack. Every bug was a deploy-and-poke
+  cycle on hardware.
+
+### What was done
+- Extracted all input-routing state machine into `ubo_service/070-doom/doom_controller.py`:
+  - `DoomController(tap_fn)` — pure Python, no Kivy/DoomLib/ubo_app dependencies
+  - Owns: `_in_level`, `_menu_active`, `_alt_mode`
+  - Methods: `go_up`, `go_down`, `go_back`, `btn_l2`, `btn_l3`, `toggle_mode`, `exit_level`,
+    `update_game_state`
+  - `update_game_state()` derives both bools from a single coherent snapshot (tick thread)
+    and returns True when the game just left a level
+- Refactored `setup.py`: `DoomPage` is now a thin shell; all input logic delegates to controller
+- Added `ubo_service/070-doom/pyproject.toml` with pytest config
+- Added `ubo_service/070-doom/tests/test_doom_controller.py`: 56 tests, 0.17s, no hardware
+  - Covers: movement, go_back routing, btn_l2/l3 routing, toggle_mode, exit_level,
+    update_game_state transitions, ping-pong regression, ALT mode lifecycle
+
+### Status
+- 56/56 tests passing locally
+- Python-only deploy: `rsync -avz ubo_service/070-doom/ ubo@192.168.88.112:~/ubo_services/070-doom/`
+- C diagnostics (fprintf in doom_api.c / g_game.c) still active — remove when controls confirmed OK
+- Pending: run pytest in CI; commit
+
+---
+
 ## 2026-02-23T13:10:03-0800 (d3314de) — Background thread; movement direction fix
 
 ### What was done

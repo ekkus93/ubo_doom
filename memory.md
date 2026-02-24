@@ -4,7 +4,7 @@
 
 ---
 
-## 2026-02-23 — Fixed second silent-audio root cause in `I_StartSound`
+## 2026-02-23T16:28:43 — Fixed second silent-audio root cause in `I_StartSound`
 
 ### Root cause
 - In `i_sound_alsa.c`, `I_StartSound()` still used `#ifdef SNDSERV` branching.
@@ -25,7 +25,7 @@
 - Combined with prior `I_SubmitSound` fix, this restores full ALSA in-process mixing/output pipeline for Doom.
 - User validation pending.
 
-## 2026-02-23 — Fixed root cause for silent Doom audio (SNDSERV submit path)
+## 2026-02-23T16:28:43 — Fixed root cause for silent Doom audio (SNDSERV submit path)
 
 ### Root cause
 - In `i_sound_alsa.c`, `I_InitSound()` opened ALSA PCM successfully, but `I_SubmitSound()` still used a `#ifdef SNDSERV` branch writing to legacy `audio_fd` (sndserver path) when `SNDSERV` is defined in Doom headers.
@@ -44,7 +44,7 @@
 ### Status
 - This addresses the core mismatch between ALSA init and submit paths; user validation of in-game sound pending.
 
-## 2026-02-23 — Applied live ALSA override on device for Doom audio
+## 2026-02-23T16:28:43 — Applied live ALSA override on device for Doom audio
 
 ### What was done
 - Updated live user override on `ubo@192.168.88.112`:
@@ -69,7 +69,7 @@
 - Confirmed effective unit environment reflects the new value.
 - Ran `speaker-test` on `sysdefault:CARD=wm8960soundcard` successfully (device opens and tone stream runs).
 
-## 2026-02-23 — Fix no-sound cases with ALSA device fallback + override
+## 2026-02-23T16:28:43 — Fix no-sound cases with ALSA device fallback + override
 
 ### Root cause
 - Doom ALSA init attempted only `snd_pcm_open(..., "default", ...)` once.
@@ -91,7 +91,7 @@
 ### Status
 - Functional change is in native ALSA init path; runtime behavior now tolerates missing `default` by trying fallback devices.
 
-## 2026-02-23 — Locked audio architecture to Option 3 (direct ALSA)
+## 2026-02-23T16:28:43 — Locked audio architecture to Option 3 (direct ALSA)
 
 ### Decision
 - User selected Option 3: keep Doom audio direct to ALSA, with no ubo_app sound-stream integration changes.
@@ -106,7 +106,7 @@
 - No functional audio-path code changes were made.
 - Current behavior remains: Doom writes PCM directly via ALSA in `i_sound_alsa.c`.
 
-## 2026-02-23 — Restore movement speed to +25/-25
+## 2026-02-23T15:58:25 — Restore movement speed to +25/-25
 
 ### Change
 - Updated movement experiment values back to faster defaults:
@@ -120,7 +120,7 @@
 ### Deploy
 - Rebuilt/deployed to `ubo@192.168.88.112` and restarted `ubo-app`.
 
-## 2026-02-23 — Root cause confirmed: sign loss in `ticcmd_t.forwardmove`
+## 2026-02-23T15:45:02 — Root cause confirmed: sign loss in `ticcmd_t.forwardmove`
 
 ### Finding
 - Verified target compiler defines `__CHAR_UNSIGNED__ = 1` on device.
@@ -139,7 +139,7 @@
 - Sign handling is now explicit and portable across toolchains where plain `char` is unsigned.
 - User validation pending on hardware controls.
 
-## 2026-02-23 — Force UP/DOWN forwardmove to +15/-15 (experiment)
+## 2026-02-23T15:45:02 — Force UP/DOWN forwardmove to +15/-15 (experiment)
 
 ### Request
 - User requested deterministic movement test: UP should map to `fwd=15`, DOWN to `fwd=-15`.
@@ -164,7 +164,7 @@
 ### Status
 - Experiment is live on device and ready for user validation.
 
-## 2026-02-23 — Deploy + verify canonical cwd/config enforcement on device
+## 2026-02-23T15:45:02 — Deploy + verify canonical cwd/config enforcement on device
 
 ### What was done
 - Ran native on-device build/deploy successfully:
@@ -187,7 +187,7 @@
 - Patch is deployed and present on device.
 - Runtime line `[doom] launch paths: ...` is emitted only when the Doom page is opened (during `DoomPage._init_doom`), so that specific log confirmation is pending user launching Doom once.
 
-## 2026-02-23 — Enforce canonical Doom config path + launch cwd
+## 2026-02-23T15:45:02 — Enforce canonical Doom config path + launch cwd
 
 ### Root cause
 - Embedded Doom init was only passing `-iwad`; linuxdoom then defaulted config to `$HOME/.doomrc`
@@ -219,7 +219,7 @@
 - Pending on-device rebuild/deploy and runtime verification that Doom now ignores stale `$HOME/.doomrc`
   and always uses the configured `UBO_DOOM_CONFIG`.
 
-## 2026-02-23T14:44:46-0800 (90d3254) — Restore BACK×N navigation; correct go_back branch order
+## 2026-02-23T14:44:46 (90d3254) — Restore BACK×N navigation; correct go_back branch order
 
 ### Root cause
 Previous fix (412b126) sent ESCAPE in ALL non-level states, which opened the Doom menu
@@ -242,7 +242,7 @@ forward. State never alternates because MENU_SELECT doesn't close the menu.
 
 ---
 
-## 2026-02-23T14:39:37-0800 (412b126) — Fix go_back ping-pong: always ESCAPE when not in-level
+## 2026-02-23T14:39:37 (412b126) — Fix go_back ping-pong: always ESCAPE when not in-level
 
 ### Root cause
 `go_back()` had three branches: FIRE (in-level), ESCAPE (menu active), MENU_SELECT/ENTER (other).
@@ -263,7 +263,7 @@ advances intermissions/finales — correct in all states. L3 handles menu confir
 
 ---
 
-## 2026-02-23T14:31:12-0800 (717fafd) — Extract DoomController; add unit tests; fix menuactive() race condition
+## 2026-02-23T14:31:12 (717fafd) — Extract DoomController; add unit tests; fix menuactive() race condition
 
 ### Root causes fixed
 - **Race condition in go_back() / _btn_l3()**: both were calling `doom.menuactive()` directly
@@ -295,7 +295,7 @@ advances intermissions/finales — correct in all states. L3 handles menu confir
 
 ---
 
-## 2026-02-23T13:10:03-0800 (d3314de) — Background thread; movement direction fix
+## 2026-02-23T13:10:03 (d3314de) — Background thread; movement direction fix
 
 ### What was done
 - Moved the Doom tick loop off the Kivy main thread onto a dedicated `doom-tick` background
@@ -322,7 +322,7 @@ advances intermissions/finales — correct in all states. L3 handles menu confir
 
 ---
 
-## 2026-02-23T12:14:37-0800 (789e17f..533df66) — Fire button; key bindings; context-aware BACK
+## 2026-02-23T12:14:37 (789e17f..533df66) — Fire button; key bindings; context-aware BACK
 
 ### What was done
 - **Diagnosed fire button failure**: `#define HU_MSGREFRESH KEY_ENTER` in `hu_stuff.h` —
@@ -341,7 +341,7 @@ advances intermissions/finales — correct in all states. L3 handles menu confir
 
 ---
 
-## 2026-02-23T11:33:28-0800 (a890969) — First working game screen on aarch64
+## 2026-02-23T11:33:28 (a890969) — First working game screen on aarch64
 
 ### What was done
 - Doom initialises cleanly from `libubodoom.so` and reaches title screen.
@@ -367,7 +367,7 @@ advances intermissions/finales — correct in all states. L3 handles menu confir
 
 ---
 
-## 2026-02-22T20:10:27-0800 (53e5b84..c4abb5e) — Audio fixes; stability improvements
+## 2026-02-22T20:10:27 (53e5b84..c4abb5e) — Audio fixes; stability improvements
 
 ### What was done
 - Fixed silent audio: `I_UpdateSound()` was guarded by `SNDINTR` (never defined).
@@ -382,7 +382,7 @@ advances intermissions/finales — correct in all states. L3 handles menu confir
 
 ---
 
-## 2026-02-21T07:31:35-0800 (bb76fbc..165b8aa) — Service scaffolding; on-device build; initial port
+## 2026-02-21T07:31:35 (bb76fbc..165b8aa) — Service scaffolding; on-device build; initial port
 
 ### What was done
 - Scaffolded `ubo_service/070-doom/` service: `setup.py`, `native/doom_lib.py`, `__init__.py`.
@@ -394,14 +394,14 @@ advances intermissions/finales — correct in all states. L3 handles menu confir
 
 ---
 
-## 2026-02-18T14:21:29-0800 (c0c4343..973d54b) — Project initialised
+## 2026-02-18T14:21:29 (c0c4343..973d54b) — Project initialised
 
 - Initial commit: project structure, LICENSES, README skeleton. Added `.gitignore`.
 - Committed: `c0c4343`, `058870b`, `973d54b`
 
 ---
 
-## Reference: current device / key values
+## 2026-02-23T13:46:53 — Reference: current device / key values
 
 - Device: aarch64 RPi4, `ubo@192.168.88.112` (use IP when Doom running — mDNS unreliable under load)
 - Deploy C+Python: `./native/scripts/build_on_device.sh ubo@192.168.88.112`

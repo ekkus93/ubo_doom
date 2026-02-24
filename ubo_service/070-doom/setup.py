@@ -36,7 +36,8 @@ Environment:
 - UBO_DOOM_IWAD : path to IWAD (.wad)   (default: ~/doom/doom2.wad)
 - UBO_DOOM_FPS  : target fps (default: 30)
 
-This file is aligned with the *actual* exported symbols from ubodoom_linuxdoom110.patch,
+This file is aligned with the exported symbols from the pre-modified
+`third_party/DOOM-master/linuxdoom-1.10` source build,
 as wrapped by `ubo_service/070-doom/native/doom_lib.py`:
   - doom_init
   - doom_tick

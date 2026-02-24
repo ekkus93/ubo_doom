@@ -11,8 +11,13 @@
   then blits to LCD with `bypass_pause=True`.
 
 ## Input pipeline
-- Service observes `state.keypad.pressed_keys` via `store.autorun` and emits Doom key down/up events.
+- `DoomController` owns the input routing state machine (normal/ALT/menu-aware routing).
+- Service emits Doom key down/up events from keypad state and current game/menu state.
 
 ## Audio pipeline
 - Doom outputs directly to ALSA (Option 3 / Option A).
 - No ubo_app sound stream integration is used.
+
+## CI/CD pipeline
+- GitHub Actions workflow `.github/workflows/ci-release.yml` runs CI on PRs/pushes to `master`.
+- Tag pushes (`v*`, `release-*`) additionally publish release artifacts.

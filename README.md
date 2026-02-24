@@ -1,5 +1,7 @@
 # ubo_doom_port
 
+[![CI and Release Artifacts](https://github.com/ekkus93/ubo_doom/actions/workflows/ci-release.yml/badge.svg)](https://github.com/ekkus93/ubo_doom/actions/workflows/ci-release.yml)
+
 A non-fork “Doom on ubo_app” port implemented as an **external ubo service** (no changes to the `ubo_app` repo).
 Video is rendered **240×240 letterboxed** to preserve Doom’s aspect ratio; audio outputs directly to **ALSA** (Option A).
 
@@ -133,3 +135,9 @@ See `docs/CONTROLS.md`.
 ## Troubleshooting
 
 See `docs/TROUBLESHOOTING.md`.
+
+## CI/CD
+
+- Pull requests and pushes to `master` run CI checks (native `libubodoom.so` build + controller tests).
+- Tagged releases (`v*` or `release-*`) run the same CI checks and publish release artifacts.
+- Workflow: `.github/workflows/ci-release.yml`.

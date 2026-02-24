@@ -4,6 +4,79 @@
 
 ---
 
+## 2026-02-23T16:46:08 — Final docs consistency pass (architecture + troubleshooting)
+
+### What was done
+- Updated `docs/ARCHITECTURE.md`:
+  - clarified input pipeline to reflect `DoomController` as the routing state machine
+  - added CI/CD pipeline summary for `.github/workflows/ci-release.yml`
+- Updated `docs/TROUBLESHOOTING.md`:
+  - added checks for `UBO_DOOM_LIB`
+  - added guidance for `UBO_DOOM_CWD` / `UBO_DOOM_CONFIG` to avoid stale config behavior
+  - added CI/CD status section (CI on PR/master, artifacts on tags)
+
+### Status
+- Core docs now consistently reflect current runtime behavior and current GitHub Actions workflow.
+
+## 2026-02-23T16:45:16 — Documentation audit + sync with current behavior/workflow
+
+### Root cause
+- Some docs lagged behind current implementation:
+  - `docs/CONTROLS.md` still described old ALT mode and BACK behavior.
+  - `docs/SETUP_UBO_APP.md` omitted newer optional env vars (`UBO_DOOM_ALSA_DEVICE`, `UBO_DOOM_CWD`, `UBO_DOOM_CONFIG`).
+- README had CI badge but no short section describing CI-on-checkins + artifacts-on-tags behavior.
+
+### Fix
+- Updated `docs/CONTROLS.md` to match `doom_controller.py` routing.
+- Updated `docs/SETUP_UBO_APP.md` env var guidance and optional ALSA override examples.
+- Added a concise `CI/CD` section to `README.md` referencing `.github/workflows/ci-release.yml` behavior.
+
+### Status
+- Core user-facing docs now align with current controls, runtime env options, and GitHub Actions workflow.
+
+## 2026-02-23T16:43:05 — Added GitHub Actions badge to README
+
+### What was done
+- Added a status badge near the top of `README.md` linked to:
+  - `https://github.com/ekkus93/ubo_doom/actions/workflows/ci-release.yml`
+- Badge reflects state of the combined CI/release workflow used for normal check-ins and tagged releases.
+
+### Status
+- README now provides visible CI/CD health signal on the repo front page.
+
+## 2026-02-23T16:41:30 — Added GitHub Actions CI for check-ins + release artifacts for tags
+
+### What was done
+- Added workflow: `.github/workflows/ci-release.yml`.
+- Configured CI to run on pull requests and pushes to `master`:
+  - Build native `libubodoom.so` via `native/scripts/build_libubodoom.sh`
+  - Run Python controller tests: `ubo_service/070-doom/tests/test_doom_controller.py`
+- Configured tag behavior (`v*`, `release-*`) to also produce and publish release artifacts:
+  - `dist/libubodoom.so`
+  - `dist/ubo_service_070-doom.tar.gz`
+  - `dist/system_env_and_systemd_examples.tar.gz`
+  - Uploads both as workflow artifacts and GitHub Release assets.
+
+### Status
+- Normal check-ins now run CI only.
+- Tagged releases run CI plus artifact publication.
+
+## 2026-02-23T16:38:32 — Removed obsolete patch artifact; aligned docstrings with current build flow
+
+### Root cause
+- Repository no longer uses patch-application during build/deploy; sources are pre-modified in `third_party/DOOM-master/linuxdoom-1.10`.
+- Legacy wording in Python docstrings still implied `libubodoom.so` was generated from `ubodoom_linuxdoom110.patch`.
+
+### Fix
+- Deleted obsolete file: `patches/ubodoom_linuxdoom110.patch`.
+- Updated docstring language in:
+  - `ubo_service/070-doom/setup.py`
+  - `ubo_service/070-doom/native/doom_lib.py`
+  to describe build output as coming from the pre-modified third-party source tree.
+
+### Status
+- Repository wording and file layout now match the active build scripts/workflow.
+
 ## 2026-02-23T16:28:43 — Fixed second silent-audio root cause in `I_StartSound`
 
 ### Root cause

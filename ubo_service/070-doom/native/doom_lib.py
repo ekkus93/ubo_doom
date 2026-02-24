@@ -42,9 +42,10 @@ class DoomFramebufferInfo:
 
 class DoomLib:
     """
-    ctypes wrapper for libubodoom.so produced by ubodoom_linuxdoom110.patch.
+    ctypes wrapper for libubodoom.so built from the pre-modified
+    third_party/DOOM-master/linuxdoom-1.10 source tree.
 
-    Exported C API (from the patch):
+        Exported C API:
       int  doom_init(const char* iwad_path);
       void doom_tick(void);
       void doom_shutdown(void);

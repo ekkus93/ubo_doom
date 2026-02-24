@@ -5,7 +5,8 @@
 
 ## No audio
 - Ensure ALSA device is available and not held by another process.
-- Try changing device string in the Doom ALSA backend (e.g., `default` -> `plughw:0,0`).
+- Set `UBO_DOOM_ALSA_DEVICE` to a working playback device in your env/systemd override.
+- Example values: `default`, `sysdefault:CARD=wm8960soundcard`, `plughw:CARD=wm8960soundcard,DEV=0`.
 
 ## Blank screen
 - Verify `UBO_DOOM_LIB` points to `libubodoom.so`.

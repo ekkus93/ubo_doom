@@ -17,7 +17,7 @@ Video is rendered **240×240 letterboxed** to preserve Doom’s aspect ratio; au
   - pauses normal UI LCD rendering
   - drives the LCD by pushing RGB565 frames to the ST7789 (bypass pause)
   - maps ubo keypad state to Doom key events
-  - restores ubo audio/UI state when exiting
+  - restores ubo UI state when exiting
 
 - `native/scripts/`  
   Build + install helpers (safe defaults; tweak for your environment).
@@ -105,6 +105,7 @@ The key variables are:
 | `UBO_DOOM_LIB` | `$HOME/doom/libubodoom.so` |
 | `UBO_DOOM_IWAD` | `$HOME/doom/doom2.wad` (or your IWAD filename) |
 | `UBO_DOOM_FPS` | `30` |
+| `UBO_DOOM_ALSA_DEVICE` | `default` (optional override; fallback tries `default`, `sysdefault:CARD=wm8960soundcard`, `plughw:CARD=wm8960soundcard,DEV=0`, `plughw:0,0`, `hw:0,0`) |
 
 ### 7) Run ubo_app
 

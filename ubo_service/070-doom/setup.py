@@ -13,7 +13,7 @@ Video:
 
 Audio:
 - Doom outputs directly to ALSA inside the shared library (Option A).
-- This service mutes ubo_app OUTPUT while Doom runs to reduce contention.
+- This service does not route/mix audio through ubo_app; Doom owns ALSA output while active.
 
 Input:
 - Uses ubo_app menu button mechanics with a two-mode toggle:

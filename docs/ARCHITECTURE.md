@@ -14,4 +14,5 @@
 - Service observes `state.keypad.pressed_keys` via `store.autorun` and emits Doom key down/up events.
 
 ## Audio pipeline
-- Doom outputs directly to ALSA (Option A). ubo output is muted while Doom runs.
+- Doom outputs directly to ALSA (Option 3 / Option A).
+- No ubo_app sound stream integration is used.

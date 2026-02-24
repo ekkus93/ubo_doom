@@ -7,3 +7,4 @@ Environment=UBO_SERVICES_PATH=%h/ubo_services
 Environment=UBO_DOOM_LIB=%h/doom/libubodoom.so
 Environment=UBO_DOOM_IWAD=%h/doom/doom2.wad
 Environment=UBO_DOOM_FPS=30
+Environment=UBO_DOOM_ALSA_DEVICE=default

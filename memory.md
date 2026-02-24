@@ -4,6 +4,108 @@
 
 ---
 
+## 2026-02-23 — Fixed second silent-audio root cause in `I_StartSound`
+
+### Root cause
+- In `i_sound_alsa.c`, `I_StartSound()` still used `#ifdef SNDSERV` branching.
+- Because `SNDSERV` is defined in Doom headers, the function returned via the legacy sndserver path and did not enqueue sounds into internal mixer channels (`addsfx`) when sndserver was not active.
+- Result: `I_UpdateSound()` had no active channels to mix, so gameplay remained silent.
+
+### Fix
+- Updated `I_StartSound()` to always use ALSA backend behavior:
+  - enqueue with `addsfx(id, vol, steptable[pitch], sep)`
+  - return the resulting handle.
+- Removed legacy sndserver text-protocol branch from this ALSA file path.
+
+### Deploy
+- Rebuilt and deployed to `ubo@192.168.88.112`.
+- Restarted `ubo-app` to load updated `libubodoom.so`.
+
+### Status
+- Combined with prior `I_SubmitSound` fix, this restores full ALSA in-process mixing/output pipeline for Doom.
+- User validation pending.
+
+## 2026-02-23 — Fixed root cause for silent Doom audio (SNDSERV submit path)
+
+### Root cause
+- In `i_sound_alsa.c`, `I_InitSound()` opened ALSA PCM successfully, but `I_SubmitSound()` still used a `#ifdef SNDSERV` branch writing to legacy `audio_fd` (sndserver path) when `SNDSERV` is defined in Doom headers.
+- Result: Doom mixed audio was not submitted to the opened ALSA PCM device, causing silent gameplay audio despite valid mixer levels/device routing.
+
+### Fix
+- Updated `third_party/DOOM-master/linuxdoom-1.10/i_sound_alsa.c`:
+  - `I_SubmitSound()` now always writes via `snd_pcm_writei(audio_pcm, ...)`.
+  - `I_ShutdownSound()` now always drains/closes `audio_pcm`.
+  - Removed legacy `audio_fd`-based SNDSERV conditional behavior from these two runtime paths.
+
+### Deploy
+- Rebuilt and deployed on `ubo@192.168.88.112` with `build_on_device.sh`.
+- Restarted `ubo-app` to load the new `libubodoom.so`.
+
+### Status
+- This addresses the core mismatch between ALSA init and submit paths; user validation of in-game sound pending.
+
+## 2026-02-23 — Applied live ALSA override on device for Doom audio
+
+### What was done
+- Updated live user override on `ubo@192.168.88.112`:
+  - `~/.config/systemd/user/ubo-app.service.d/override.conf`
+  - Added `Environment=UBO_DOOM_ALSA_DEVICE=plughw:CARD=wm8960soundcard,DEV=0`
+- Reloaded/restarted service:
+  - `systemctl --user daemon-reload`
+  - `systemctl --user restart ubo-app`
+
+### Verification
+- Confirmed effective unit environment includes:
+  - `UBO_DOOM_ALSA_DEVICE=plughw:CARD=wm8960soundcard,DEV=0`
+- Recent log tail showed Doom input/runtime logs; ALSA init lines are expected when Doom session initializes sound path.
+
+### Current status
+- Device is configured to prefer WM8960 playback endpoint for Doom ALSA output.
+- User needs to launch Doom and trigger in-game sound to validate audible output.
+
+### Follow-up update
+- Switched live override from `plughw:CARD=wm8960soundcard,DEV=0` to
+  `sysdefault:CARD=wm8960soundcard` to use the shared ALSA path.
+- Confirmed effective unit environment reflects the new value.
+- Ran `speaker-test` on `sysdefault:CARD=wm8960soundcard` successfully (device opens and tone stream runs).
+
+## 2026-02-23 — Fix no-sound cases with ALSA device fallback + override
+
+### Root cause
+- Doom ALSA init attempted only `snd_pcm_open(..., "default", ...)` once.
+- On some device states/configs, `default` is unavailable or not the active playback endpoint, resulting in silent Doom.
+
+### Fix applied
+- Updated `third_party/DOOM-master/linuxdoom-1.10/i_sound_alsa.c`:
+  - Added `UBO_DOOM_ALSA_DEVICE` environment override support.
+  - Added fallback open attempts in order: override, `default`, `sysdefault:CARD=wm8960soundcard`, `plughw:CARD=wm8960soundcard,DEV=0`, `plughw:0,0`, `hw:0,0`.
+  - Added per-device init logging for open attempts/success/failure.
+
+### Configuration updates
+- Added `UBO_DOOM_ALSA_DEVICE` to:
+  - `system/env/ubo_app.env.example`
+  - `system/systemd/ubo_app_override.conf.example`
+  - `ubo_service/070-doom/config/doom.env.example`
+- Updated troubleshooting docs to use env override instead of editing C backend.
+
+### Status
+- Functional change is in native ALSA init path; runtime behavior now tolerates missing `default` by trying fallback devices.
+
+## 2026-02-23 — Locked audio architecture to Option 3 (direct ALSA)
+
+### Decision
+- User selected Option 3: keep Doom audio direct to ALSA, with no ubo_app sound-stream integration changes.
+
+### Repository updates
+- Synced documentation/comments to match runtime behavior:
+  - `ubo_service/070-doom/setup.py` audio section now states Doom owns ALSA output while active.
+  - `docs/ARCHITECTURE.md` audio pipeline now explicitly documents Option 3 / direct ALSA and no ubo_app stream path.
+  - `README.md` wording adjusted to avoid implying ubo-managed audio restoration.
+
+### Status
+- No functional audio-path code changes were made.
+- Current behavior remains: Doom writes PCM directly via ALSA in `i_sound_alsa.c`.
+
 ## 2026-02-23 — Restore movement speed to +25/-25
 
 ### Change

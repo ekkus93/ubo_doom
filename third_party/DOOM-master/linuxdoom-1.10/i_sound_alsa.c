@@ -27,6 +27,7 @@ rcsid[] = "$Id: i_unix.c,v 1.5 1997/02/03 22:45:10 b1 Exp $";
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
+#include <string.h>
 
 #include <math.h>
 
@@ -149,6 +150,61 @@ int		vol_lookup[128*256];
 // Hardware left and right channel volume lookup.
 int*		channelleftvol_lookup[NUM_CHANNELS];
 int*		channelrightvol_lookup[NUM_CHANNELS];
+
+static int
+I_OpenPreferredAlsaPcm(snd_pcm_t** out_pcm)
+{
+    const char* preferred;
+  const char* candidates[6];
+    int i;
+    int err;
+
+    preferred = getenv("UBO_DOOM_ALSA_DEVICE");
+
+    candidates[0] = preferred;
+    candidates[1] = "default";
+    candidates[2] = "sysdefault:CARD=wm8960soundcard";
+    candidates[3] = "plughw:CARD=wm8960soundcard,DEV=0";
+    candidates[4] = "plughw:0,0";
+    candidates[5] = "hw:0,0";
+
+    for (i = 0; i < 6; ++i)
+    {
+  const char* dev = candidates[i];
+
+  if (!dev || !dev[0])
+      continue;
+
+  if (i > 0)
+  {
+      int j;
+      int duplicate = 0;
+      for (j = 0; j < i; ++j)
+      {
+    const char* prev = candidates[j];
+    if (prev && prev[0] && strcmp(prev, dev) == 0)
+    {
+        duplicate = 1;
+        break;
+    }
+      }
+      if (duplicate)
+    continue;
+  }
+
+  fprintf(stderr, "ALSA: trying playback device '%s'\n", dev);
+  err = snd_pcm_open(out_pcm, dev, SND_PCM_STREAM_PLAYBACK, 0);
+  if (err >= 0)
+  {
+      fprintf(stderr, "ALSA: using playback device '%s'\n", dev);
+      return 0;
+  }
+
+  fprintf(stderr, "ALSA: snd_pcm_open('%s') failed: %s\n", dev, snd_strerror(err));
+    }
+
+    return -1;
+}
 
 
 
@@ -478,26 +534,12 @@ I_StartSound
 
   // UNUSED
   priority = 0;
-  
-#ifdef SNDSERV 
-    if (sndserver)
-    {
-	fprintf(sndserver, "p%2.2x%2.2x%2.2x%2.2x\n", id, pitch, vol, sep);
-	fflush(sndserver);
-    }
-    // warning: control reaches end of non-void function.
-    return id;
-#else
-    // Debug.
-    //fprintf( stderr, "starting sound %d", id );
-    
-    // Returns a handle (not used).
-    id = addsfx( id, vol, steptable[pitch], sep );
 
-    // fprintf( stderr, "/handle is %d\n", id );
-    
-    return id;
-#endif
+  // ALSA backend: always enqueue into the internal mixer channels.
+  // Do not use the legacy sndserver text protocol path.
+  id = addsfx( id, vol, steptable[pitch], sep );
+
+  return id;
 }
 
 
@@ -665,10 +707,6 @@ void I_UpdateSound( void )
 void
 I_SubmitSound(void)
 {
-#ifdef SNDSERV
-  // Write to sound server.
-  write(audio_fd, mixbuffer, SAMPLECOUNT*BUFMUL);
-#else
   if (!audio_pcm) return;
 
   // SAMPLECOUNT is "frames" (each frame = stereo sample = 4 bytes)
@@ -678,7 +716,6 @@ I_SubmitSound(void)
     // Try to recover from underruns, etc.
     frames = snd_pcm_recover(audio_pcm, (int)frames, 1);
   }
-#endif
 }
 
 
@@ -706,16 +743,12 @@ I_UpdateSoundParams
 void
 I_ShutdownSound(void)
 {
-#ifdef SNDSERV
-  close (audio_fd);
-#else
   if (audio_pcm)
   {
     snd_pcm_drain(audio_pcm);
     snd_pcm_close(audio_pcm);
     audio_pcm = NULL;
   }
-#endif
 }
 
 
@@ -759,10 +792,9 @@ I_InitSound()
   for (i = 0; i < MIXBUFFERSIZE; i++)
     mixbuffer[i] = 0;
 
-  err = snd_pcm_open(&audio_pcm, "default", SND_PCM_STREAM_PLAYBACK, 0);
-  if (err < 0)
+  if (I_OpenPreferredAlsaPcm(&audio_pcm) < 0)
   {
-    fprintf(stderr, "ALSA: snd_pcm_open failed: %s\n", snd_strerror(err));
+    fprintf(stderr, "ALSA: failed to open any playback PCM device\n");
     audio_pcm = NULL;
     return;
   }

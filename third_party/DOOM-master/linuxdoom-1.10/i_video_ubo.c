@@ -46,14 +46,18 @@ void I_ReadScreen(byte* scr) { memcpy(scr, screens[0], SCREENWIDTH*SCREENHEIGHT)
 
 void I_FinishUpdate(void)
 {
+    const byte* src;
+    uint8_t* dst;
+    int i;
+
     if (!g_inited) I_InitGraphics();
     if (!g_palette) return;
 
     // Convert 8-bit indexed pixels to RGBA (alpha=255).
-    const byte* src = screens[0];
-    uint8_t* dst = ubo_rgba;
+    src = screens[0];
+    dst = ubo_rgba;
 
-    for (int i = 0; i < SCREENWIDTH * SCREENHEIGHT; i++)
+    for (i = 0; i < SCREENWIDTH * SCREENHEIGHT; i++)
     {
         int idx = src[i] * 3;
         dst[i*4 + 0] = g_palette[idx + 0];

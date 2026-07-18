@@ -94,7 +94,7 @@ $(O)/%.o:	%.c
 
 # UBO: build a shared library
 UBO_O=$(O)/ubo
-UBO_CFLAGS=$(CFLAGS) -O2 -fPIC
+UBO_CFLAGS=$(CFLAGS) -O2 -fPIC -std=gnu89
 UBO_LIBS=-lasound -lm
 
 UBO_OBJS=$(patsubst $(O)/%,$(UBO_O)/%,$(OBJS))

@@ -203,31 +203,45 @@ The environment variables must reach the Ubo core process that loads external se
 
 ## Controls
 
-Ubo owns BACK and HOME for navigation.
+Ubo owns BACK and HOME for navigation (BACK leaves Doom, HOME returns to the Ubo
+home screen), so Doom is driven with the remaining five inputs. Turning is always
+live so you can turn and shoot at once; the DOWN button is multiplexed and **L1
+(MODE) cycles what it does**. The active mode is shown as a small color-coded tag
+in the top-left of the Doom image.
 
-### Normal mode
+See [`docs/CONTROLS.md`](docs/CONTROLS.md) for the full description.
+
+### Gameplay
 
 | Button | Doom action |
 |---|---|
 | UP | Move forward |
-| DOWN | Move backward |
-| L1 | Enter alternate mode |
 | L2 | Turn left |
-| L3 | Turn right or select |
-| BACK | Leave Doom |
-| HOME | Return to Ubo home |
+| L3 | Turn right |
+| L1 (MODE) | Cycle what DOWN does: **FIRE → USE → BACK → WEAPON** (wraps) |
+| DOWN | Perform the current mode's action (see below) |
 
-### Alternate mode
+DOWN by mode:
+
+| Mode | DOWN does |
+|---|---|
+| FIRE (default) | Fire |
+| USE | Use — open doors, flip switches |
+| BACK | Move backward |
+| WEAPON | Switch to your next owned weapon |
+
+While DOWN is set to FIRE / USE / WEAPON you cannot move backward — turn 180° and
+walk forward instead. The mode resets to FIRE whenever you leave a level.
+
+### Menus (title screen, Doom menu, intermission)
 
 | Button | Doom action |
 |---|---|
-| UP | Move forward |
-| DOWN | Move backward |
-| L1 | Return to normal mode |
-| L2 | Use/open |
-| L3 | Fire |
-| BACK | Leave Doom |
-| HOME | Return to Ubo home |
+| UP / DOWN | Move the menu cursor |
+| L3 | Title/demo: open the Doom menu; menu: select; intermission/finale: continue |
+
+To start a game from the title screen: press **L3** to open the menu, **UP/DOWN**
+to choose, then **L3** to select.
 
 ## Updating
 

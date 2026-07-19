@@ -4,3 +4,17 @@
 testpaths = ["tests"]
 pythonpath = ["."]      # adds ubo_service/070-doom/ so `from doom_controller import ...` works
 addopts    = "-v --tb=short"
+
+# Lint with:  cd ubo_service/070-doom && ruff check .
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+# E/F pycodestyle+pyflakes, I import sorting, UP pyupgrade, B bugbear,
+# ANN require annotations (this service is fully type-hinted), FA future-annotations.
+select = ["E", "F", "I", "UP", "B", "ANN", "FA"]
+ignore = ["ANN401"]  # allow `object` action params in reducers/controllers
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["ANN"]  # test functions don't need return annotations

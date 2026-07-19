@@ -24,7 +24,7 @@ class DoomVideoPipe:
     out_rgb: np.ndarray
 
     @classmethod
-    def create(cls, *, src_w: int, src_h: int) -> "DoomVideoPipe":
+    def create(cls, *, src_w: int, src_h: int) -> DoomVideoPipe:
         if src_w <= 0 or src_h <= 0:
             raise ValueError(f"invalid source dimensions: {src_w}x{src_h}")
 

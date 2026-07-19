@@ -21,3 +21,6 @@ native/out/
 *.wad
 
 docs/chatgpt/
+
+# Python dev venv
+.venv/

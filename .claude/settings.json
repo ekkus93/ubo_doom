@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "statusMessage": "Running Doom service tests...",
+            "command": "python3 -c \"import sys,json,os,subprocess; d=json.load(sys.stdin); f=(d.get('tool_input') or {}).get('file_path') or (d.get('tool_response') or {}).get('filePath') or ''; root=os.getcwd(); svc=os.path.join(root,'ubo_service','070-doom'); py=os.path.join(root,'.venv','bin','python'); py=py if os.path.exists(py) else 'python3'; (f.endswith('.py') and 'ubo_service/070-doom' in f) and subprocess.run([py,'-m','pytest','-q'],cwd=svc)\" 2>/dev/null || true"
+          }
+        ]
+      }
+    ]
+  }
+}

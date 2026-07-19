@@ -116,8 +116,15 @@ static snd_pcm_t* audio_pcm = NULL;
 // I_UpdateSound(). See ubo_audio_thread().
 static pthread_t        audio_thread;
 static pthread_mutex_t  audio_mutex = PTHREAD_MUTEX_INITIALIZER;
-static volatile int     audio_running = 0;
 static int              audio_thread_started = 0;
+
+// Cross-thread stop flag. `volatile` alone is NOT enough — it prevents compiler
+// caching but gives no atomicity/ordering between threads, which is a real data
+// race (flagged by TSan). Use GCC atomic builtins for correct release/acquire
+// handoff between I_ShutdownSound (store 0) and the audio thread (loads).
+static int              audio_running = 0;
+#define AUDIO_RUNNING_LOAD()   __atomic_load_n(&audio_running, __ATOMIC_ACQUIRE)
+#define AUDIO_RUNNING_STORE(v) __atomic_store_n(&audio_running, (v), __ATOMIC_RELEASE)
 // The global mixing buffer.
 // Basically, samples from all active internal channels
 //  are modifed and added, and stored in the buffer
@@ -755,12 +762,12 @@ static void ubo_write_chunk(void)
   snd_pcm_sframes_t frames;
 
   frames = snd_pcm_writei(audio_pcm, mixbuffer, SAMPLECOUNT);
-  if (frames < 0 && audio_running)
+  if (frames < 0 && AUDIO_RUNNING_LOAD())
   {
     // Underrun (-EPIPE), suspend, or IO aborted on shutdown: recover and try
     // once more. Any failure here only affects audio, never the game thread.
     frames = snd_pcm_recover(audio_pcm, (int)frames, 1);
-    if (frames >= 0 && audio_running)
+    if (frames >= 0 && AUDIO_RUNNING_LOAD())
       snd_pcm_writei(audio_pcm, mixbuffer, SAMPLECOUNT);
   }
 }
@@ -768,7 +775,7 @@ static void ubo_write_chunk(void)
 static void* ubo_audio_thread(void* arg)
 {
   (void)arg;
-  while (audio_running)
+  while (AUDIO_RUNNING_LOAD())
   {
     // Mix current channel state into mixbuffer under the lock so a sound being
     // started on the game thread (addsfx) can't tear a channel pointer mid-mix.
@@ -811,7 +818,7 @@ I_ShutdownSound(void)
   {
     // Signal the thread to stop, then abort any in-flight blocking write
     // (snd_pcm_drop) so it wakes immediately, and join it.
-    audio_running = 0;
+    AUDIO_RUNNING_STORE(0);
     if (audio_pcm)
       snd_pcm_drop(audio_pcm);
     pthread_join(audio_thread, NULL);
@@ -892,11 +899,11 @@ I_InitSound()
   // Keep the device in blocking mode: the audio thread's blocking write is what
   // paces sound output to real-time. Output runs on its own thread (never the
   // game/render thread), so blocking here is harmless to gameplay.
-  audio_running = 1;
+  AUDIO_RUNNING_STORE(1);
   if (pthread_create(&audio_thread, NULL, ubo_audio_thread, NULL) != 0)
   {
     fprintf(stderr, "ALSA: failed to start audio thread; sound disabled\n");
-    audio_running = 0;
+    AUDIO_RUNNING_STORE(0);
     snd_pcm_close(audio_pcm);
     audio_pcm = NULL;
     return;

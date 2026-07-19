@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Final
 
 import numpy as np
-
 from ubo_app.logger import logger
 from ubo_app.store.core.action_registry import register_action, unregister_action
 from ubo_app.store.core.types import (
@@ -27,7 +26,7 @@ from ubo_app.store.core.types import (
 from ubo_app.store.main import store
 
 from doom_controller import DoomController
-from doom_video import DoomVideoPipe, OUT_H, OUT_W
+from doom_video import OUT_H, OUT_W, DoomVideoPipe
 from native.doom_lib import DoomLib, UboKey
 
 DOOM_STREAM_ID: Final = "doom:video"
@@ -37,7 +36,14 @@ DOOM_RENDER_ITEMS: Final = (
     MenuItemData(key="doom:left-use", label="LEFT/USE", icon=""),
     MenuItemData(key="doom:right-fire", label="RIGHT/FIRE", icon=""),
 )
-_OPPOSITE: Final = {UboKey.UP: UboKey.DOWN, UboKey.DOWN: UboKey.UP}
+_OPPOSITE: Final = {
+    UboKey.UP: UboKey.DOWN,
+    UboKey.DOWN: UboKey.UP,
+    # Turning: releasing the opposite turn key first keeps a quick reverse-turn
+    # from being swallowed while the previous turn is still held (12-tick hold).
+    UboKey.LEFT: UboKey.RIGHT,
+    UboKey.RIGHT: UboKey.LEFT,
+}
 
 
 def _positive_float(name: str, default: float) -> float:
@@ -182,6 +188,12 @@ class DoomSession:
                 self._cwd,
             )
             doom = DoomLib(self._lib)
+            if not doom.has_usergame:
+                logger.warning(
+                    "[doom] libubodoom.so lacks doom_get_usergame — attract demos "
+                    "will be treated as gameplay and the menu button may not open "
+                    "the menu; rebuild and redeploy the native library"
+                )
             doom.init(str(self._iwad))
             fb = doom.framebuffer_info()
             if fb.width <= 0 or fb.height <= 0:
@@ -256,6 +268,7 @@ class DoomSession:
                     alive=alive,
                     gamestate=doom.gamestate() if alive else -1,
                     menuactive=doom.menuactive() if alive else False,
+                    usergame=doom.usergame() if alive else False,
                 )
                 if left_level:
                     self._controller.exit_level()

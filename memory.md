@@ -4,6 +4,56 @@
 
 ---
 
+## 2026-07-19T16:22:06 — Fix "can't start game": demo misdetected as gameplay + turn-reversal
+
+### Root cause (start-game bug)
+- On the Ubo v2 controller, pressing RIGHT/FIRE (L3) at the title screen was
+  supposed to send ESCAPE to open the Doom menu (the only way to start a game on
+  v2, since BACK is owned by Ubo). Instead it often sent RIGHT (turn), so the menu
+  never opened.
+- Reason: the attract-loop demos run at `gamestate == GS_LEVEL` with
+  `usergame == false` / `demoplayback == true` (see `g_game.c:1185`, `1644-1645`).
+  `DoomController.update_game_state` decided "in a level" from gamestate alone, so
+  a playing demo counted as gameplay → `btn_l3` took the in-level branch (turn
+  right) instead of the title/demo branch (ESCAPE). Intermittent because the title
+  screen alternates static title page (GS_DEMOSCREEN, worked) and demo (GS_LEVEL,
+  broke).
+
+### Fix (spans native + Python — native lib MUST be redeployed)
+- `doom_api.c` / `doom_api.h`: added `int doom_get_usergame(void)` exposing
+  `usergame` (already extern in `doomstat.h`).
+- `native/doom_lib.py`: bound the symbol; `usergame()` method; tolerant of a stale
+  `.so` via `has_usergame` (falls back to True = old behavior, no crash).
+- `doom_controller.py`: `update_game_state(..., usergame)` →
+  `in_level = alive and usergame and gamestate == GS_LEVEL and not menu_active`.
+- `setup.py`: passes `doom.usergame()` each tick; logs a warning if the loaded
+  `.so` lacks the accessor.
+- Test: `test_attract_demo_opens_menu_not_turn`.
+
+### Also fixed (pure Python, live on restart)
+- Turn-reversal lag: added `LEFT↔RIGHT` to `_OPPOSITE` in `setup.py` so a quick
+  reverse-turn releases the still-held opposite turn key (12-tick hold) first.
+  Test: `test_reverse_turn_releases_opposite_turn_key`.
+
+### Platform finding (why old BACK behavior can't be restored on v2)
+- Ubo v2's core `000-keypad` reducer maps L1/L2/L3 → `MenuChooseByIndexEvent(0/1/2)`,
+  UP/DOWN → `ApplicationScrollEvent`, and **BACK (released alone) →
+  `MenuGoBackAction()` unconditionally** (no `on_application` gate). All HOME+Lx /
+  BACK+Lx combos are claimed by the platform. So the app gets exactly 5 inputs
+  (UP, DOWN, L1, L2, L3); the old 6th button (BACK = fire/select/menu) is gone.
+  ALT mode exists to multiplex fire onto L3. User chose to keep the v2 ALT-mode
+  model rather than patch the platform.
+- `docs/CONTROLS.md` rewritten to the real v2 scheme (was still describing the
+  pre-v2 BACK-based scheme).
+
+### Status / TODO
+- 28 pytest pass, ruff clean, `.so` rebuilds and exports `doom_get_usergame`.
+- **Pending: redeploy `native/out/libubodoom.so` → device `~/doom/libubodoom.so`
+  and restart `ubo-app`.** Until then the service logs "lacks doom_get_usergame"
+  and keeps the broken-start behavior.
+
+---
+
 ## 2026-02-23T16:46:08 — Final docs consistency pass (architecture + troubleshooting)
 
 ### What was done

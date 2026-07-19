@@ -49,10 +49,17 @@ class DoomController:
         alive: bool,
         gamestate: int,
         menuactive: bool,
+        usergame: bool = True,
     ) -> bool:
-        """Refresh cached engine state and report a transition out of gameplay."""
+        """Refresh cached engine state and report a transition out of gameplay.
+
+        ``usergame`` distinguishes a real game from the attract-loop demos, which
+        also run at ``GS_LEVEL``. Without it, a playing demo counts as being
+        in a level, so buttons that should open the menu (to start a game) turn
+        the player instead. Defaults to True for callers that cannot supply it.
+        """
         menu_active = bool(menuactive) if alive else False
-        in_level = bool(alive and gamestate == GS_LEVEL and not menu_active)
+        in_level = bool(alive and usergame and gamestate == GS_LEVEL and not menu_active)
         was_in_level = self._in_level
 
         self._alive = alive

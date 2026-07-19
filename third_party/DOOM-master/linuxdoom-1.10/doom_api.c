@@ -327,6 +327,10 @@ int doom_get_rgba_height(void) { return 200; }
 int doom_is_alive(void) { return g_inited == 1; }
 int doom_get_gamestate(void) { return (int)gamestate; }
 int doom_get_menuactive(void) { return menuactive ? 1 : 0; }
+/* usergame is true only for a real, user-started game; it is false while the
+   attract-loop demos play (which also run at gamestate == GS_LEVEL). Callers
+   need this to tell a live game apart from a demo. */
+int doom_get_usergame(void) { return usergame ? 1 : 0; }
 
 void doom_reset(void)
 {

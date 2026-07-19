@@ -5,11 +5,11 @@ from __future__ import annotations
 import pytest
 
 from doom_controller import (
-    DoomController,
     GS_DEMOSCREEN,
     GS_FINALE,
     GS_INTERMISSION,
     GS_LEVEL,
+    DoomController,
 )
 from native.doom_lib import UboKey
 
@@ -132,6 +132,20 @@ class TestL3:
         rec: Recorder,
     ) -> None:
         ctrl.update_game_state(alive=True, gamestate=GS_DEMOSCREEN, menuactive=False)
+        ctrl.btn_l3()
+        assert rec.last_key is UboKey.ESCAPE
+
+    def test_attract_demo_opens_menu_not_turn(
+        self,
+        ctrl: DoomController,
+        rec: Recorder,
+    ) -> None:
+        # Attract-loop demos run at GS_LEVEL but usergame=False. Pressing L3 must
+        # open the menu (ESCAPE) so a game can be started, not turn right.
+        ctrl.update_game_state(
+            alive=True, gamestate=GS_LEVEL, menuactive=False, usergame=False
+        )
+        assert ctrl.in_level is False
         ctrl.btn_l3()
         assert rec.last_key is UboKey.ESCAPE
 

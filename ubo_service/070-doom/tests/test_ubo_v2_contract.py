@@ -197,3 +197,39 @@ def test_current_view_guards_key_and_scroll_events(
         ("button", 2),
         "pause",
     ]
+
+
+class FakeDoom:
+    """Records key_down/key_up so _drain_inputs behavior can be asserted."""
+
+    def __init__(self) -> None:
+        self.events: list[tuple[str, int]] = []
+
+    def key_down(self, key: int) -> None:
+        self.events.append(("down", int(key)))
+
+    def key_up(self, key: int) -> None:
+        self.events.append(("up", int(key)))
+
+
+def test_reverse_turn_releases_opposite_turn_key(
+    contract_module: tuple[ModuleType, FakeStore, dict[str, object]],
+) -> None:
+    # Turning left then quickly right must release LEFT before RIGHT goes down,
+    # otherwise both turn keys are held at once and the player doesn't turn.
+    module, _store, _registry = contract_module
+    session = module.DoomSession()
+    doom = FakeDoom()
+    UboKey = module.UboKey
+
+    session._queue.put_nowait((UboKey.LEFT, 12))
+    session._queue.put_nowait((UboKey.RIGHT, 12))
+    session._drain_inputs(doom)
+
+    assert doom.events == [
+        ("down", int(UboKey.LEFT)),
+        ("up", int(UboKey.LEFT)),
+        ("down", int(UboKey.RIGHT)),
+    ]
+    assert UboKey.LEFT not in session._held
+    assert session._held[UboKey.RIGHT] == 12

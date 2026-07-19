@@ -48,6 +48,7 @@ void doom_reset(void);
 // Query current engine state (useful for context-sensitive input mapping).
 int doom_get_gamestate(void);   // 0=GS_LEVEL, 1=GS_INTERMISSION, 2=GS_FINALE, 3=GS_DEMOSCREEN
 int doom_get_menuactive(void);  // 1 if menu overlay is active, 0 otherwise
+int doom_get_usergame(void);    // 1 during a real user game, 0 during attract demos (also GS_LEVEL)
 
 #ifdef __cplusplus
 }

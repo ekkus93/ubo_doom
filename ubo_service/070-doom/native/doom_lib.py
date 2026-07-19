@@ -4,7 +4,6 @@ import ctypes
 from dataclasses import dataclass
 from enum import IntEnum
 from pathlib import Path
-from typing import Final
 
 
 class UboKey(IntEnum):
@@ -30,7 +29,8 @@ class UboKey(IntEnum):
     FIRE = 5
     USE = 6
     ESCAPE = 7
-    MENU_SELECT = 8  # maps to KEY_ENTER — only safe for menus (not in-game: stolen by HU_MSGREFRESH)
+    # maps to KEY_ENTER — only safe for menus (not in-game: stolen by HU_MSGREFRESH)
+    MENU_SELECT = 8
 
 
 @dataclass(frozen=True)
@@ -100,6 +100,15 @@ class DoomLib:
         self._lib.doom_get_menuactive.argtypes = []
         self._lib.doom_get_menuactive.restype = ctypes.c_int
 
+        # int doom_get_usergame(void);  1 during a real user game, 0 during attract demos.
+        # Added after the first v2 release, so tolerate a stale .so that lacks it.
+        try:
+            self._lib.doom_get_usergame.argtypes = []
+            self._lib.doom_get_usergame.restype = ctypes.c_int
+            self.has_usergame = True
+        except AttributeError:
+            self.has_usergame = False
+
         # const uint8_t* doom_get_rgba_ptr(void);
         self._lib.doom_get_rgba_ptr.argtypes = []
         self._lib.doom_get_rgba_ptr.restype = ctypes.POINTER(ctypes.c_uint8)
@@ -156,6 +165,18 @@ class DoomLib:
     def menuactive(self) -> bool:
         """Return True if the Doom menu overlay is currently active."""
         return bool(self._lib.doom_get_menuactive())
+
+    def usergame(self) -> bool:
+        """Return True only during a real user game.
+
+        False while the attract-loop demos play. Demos run at gamestate ==
+        GS_LEVEL, so gamestate alone cannot distinguish a demo from live play.
+        A stale .so without the accessor (see ``has_usergame``) falls back to
+        True, restoring the pre-fix behaviour rather than crashing.
+        """
+        if not self.has_usergame:
+            return True
+        return bool(self._lib.doom_get_usergame())
 
     def reset(self) -> None:
         """Clear engine state so doom_init() can be called again after a crash."""

@@ -8,8 +8,10 @@ returns to the Ubo home screen; the service deliberately does not handle them.
 
 The design keeps **turning always live** so you can turn side-to-side and shoot at
 the same time. Forward is always UP. The **DOWN button is multiplexed** through
-several actions, and **MODE (L1) cycles which one** — the current mode is shown in
-the **title bar** (e.g. `Doom · FIRE`).
+several actions, and **MODE (L1) cycles which one** — the current mode is shown as
+a small color-coded tag in the **top-left of the Doom image** (e.g. `FIRE`).
+(It is drawn into the frame rather than the view title, which would force a
+full-screen refresh on every change.)
 
 ## Gameplay
 
@@ -21,7 +23,7 @@ the **title bar** (e.g. `Doom · FIRE`).
 | L1 (MODE) | cycle what DOWN does: **FIRE → USE → BACK → WEAPON** (wraps) |
 | DOWN | performs the current mode's action (see below) |
 
-DOWN by mode (title bar shows which is active):
+DOWN by mode (the HUD tag shows which is active):
 
 | Mode | DOWN does |
 |------|-----------|

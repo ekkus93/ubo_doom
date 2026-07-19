@@ -22,11 +22,10 @@ from ubo_app.store.core.types import (
     RenderStackItem,
     StackChangedEvent,
     StackPopAction,
-    UpdateRenderPropsAction,
 )
 from ubo_app.store.main import store
 
-from doom_controller import DoomController
+from doom_controller import DoomController, DownMode
 from doom_video import OUT_H, OUT_W, DoomVideoPipe
 from native.doom_lib import DoomLib, UboKey
 
@@ -44,6 +43,14 @@ _OPPOSITE: Final = {
     # from being swallowed while the previous turn is still held (12-tick hold).
     UboKey.LEFT: UboKey.RIGHT,
     UboKey.RIGHT: UboKey.LEFT,
+}
+
+# Colors for the in-frame DOWN-mode HUD tag, so the mode reads at a glance.
+_MODE_COLORS: Final[dict[DownMode, tuple[int, int, int]]] = {
+    DownMode.FIRE: (255, 80, 80),
+    DownMode.USE: (90, 220, 120),
+    DownMode.BACK: (120, 190, 255),
+    DownMode.WEAPON: (255, 210, 80),
 }
 
 
@@ -95,7 +102,6 @@ class DoomSession:
         self._rgba: np.ndarray | None = None
         self._visible = False
         self._closed = False
-        self._mode_title = "Doom"
 
         self._fps = _positive_float("UBO_DOOM_FPS", 30.0)
         render_fps = min(self._fps, _positive_float("UBO_DOOM_RENDER_FPS", 15.0))
@@ -175,21 +181,6 @@ class DoomSession:
             self._controller.btn_l2()
         elif index == 2:
             self._controller.btn_l3()
-
-    def _sync_mode_title(self) -> None:
-        """Reflect the DOWN-button mode in the view title (updates live).
-
-        The footer button labels are fixed at open time, so the title bar is the
-        only place we can show which action DOWN currently performs.
-        """
-        if self._controller.in_level:
-            title = f"Doom · {self._controller.down_mode.name}"
-        else:
-            title = "Doom"
-        if title == self._mode_title:
-            return
-        self._mode_title = title
-        store.dispatch(UpdateRenderPropsAction(stream_id=DOOM_STREAM_ID, title=title))
 
     def _initialize(self) -> None:
         doom: DoomLib | None = None
@@ -289,15 +280,23 @@ class DoomSession:
                 )
                 if left_level:
                     self._controller.exit_level()
-                self._sync_mode_title()
                 if not alive:
                     raise RuntimeError("native Doom engine stopped")
                 if frame % self._render_every == 0:
+                    if self._controller.in_level:
+                        mode = self._controller.down_mode
+                        label = mode.name
+                        label_color = _MODE_COLORS[mode]
+                    else:
+                        label = ""
+                        label_color = None
                     store._dispatch(
                         [
                             FrameStreamDataEvent(
                                 stream_id=DOOM_STREAM_ID,
-                                data=video.rgba_to_rgb888(rgba),
+                                data=video.rgba_to_rgb888(
+                                    rgba, label=label, label_color=label_color
+                                ),
                                 width=OUT_W,
                                 height=OUT_H,
                             )

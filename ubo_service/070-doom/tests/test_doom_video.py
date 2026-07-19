@@ -54,3 +54,24 @@ def test_unexpected_frame_dtype_is_rejected() -> None:
     pipe = DoomVideoPipe.create(src_w=320, src_h=200)
     with pytest.raises(TypeError):
         pipe.rgba_to_rgb888(np.zeros((200, 320, 4), dtype=np.float32))
+
+
+def test_mode_label_draws_into_active_area_without_touching_bands() -> None:
+    pipe = DoomVideoPipe.create(src_w=320, src_h=200)
+    black = np.zeros((200, 320, 4), dtype=np.uint8)
+    color = (255, 80, 80)
+
+    plain = np.frombuffer(pipe.rgba_to_rgb888(black), dtype=np.uint8).reshape(
+        OUT_H, OUT_W, 3
+    )
+    assert not plain.any()  # all-black source -> all-black frame, no label
+
+    labelled = np.frombuffer(
+        pipe.rgba_to_rgb888(black, label="FIRE", label_color=color), dtype=np.uint8
+    ).reshape(OUT_H, OUT_W, 3)
+
+    # The tag lives in the top-left of the Doom image, in the label color.
+    assert np.any(np.all(labelled == color, axis=-1))
+    # The letterbox bands (Ubo's chrome) stay untouched.
+    assert not labelled[:PAD_TOP].any()
+    assert not labelled[PAD_TOP + ACTIVE_H :].any()

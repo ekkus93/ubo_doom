@@ -115,7 +115,6 @@ def contract_module(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
         "RenderStackItem",
         "StackChangedEvent",
         "StackPopAction",
-        "UpdateRenderPropsAction",
     )
     for name in type_names:
         setattr(

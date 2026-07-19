@@ -4,6 +4,50 @@
 
 ---
 
+## 2026-07-19T21:xx — Sanitizer pass (ASan + TSan): verified locking, fixed 2 real bugs
+
+### Setup
+- Built instrumented Doom objects + a headless C stress harness
+  (`scratchpad/harness.c`, `scratchpad/run_sanitizers.sh`) that ticks the engine
+  through the attract demos (which shoot → lots of S_StartSound → addsfx) with the
+  audio thread pointed at ALSA `null` (spins full-speed = max contention). Dev box
+  has all IWADs in ~/doom, gcc 12, 3.7 GB RAM — ASan+TSan both usable here.
+- Note: ASan is weak for Doom-INTERNAL heap bugs (custom zone allocator = one big
+  malloc, so intra-zone overruns don't cross redzones), but DOES catch overruns of
+  true globals/statics/stack. TSan is the right tool for the locking question.
+
+### Prerequisite fix — engine was swallowing sanitizer faults
+- `doom_api.c` installs SIGSEGV/SIGBUS handlers that longjmp; they intercepted the
+  faults ASan/TSan want to report. Added `UBO_SIGACTION()` macro: under
+  `__SANITIZE_ADDRESS__`/`__SANITIZE_THREAD__` it's a no-op (don't trap), else it's
+  plain `sigaction()`. All install/restore sites now route through it. No-op change
+  in normal builds.
+
+### Bug 1 (real, pre-existing) — global-buffer-overflow reading `sprnames`
+- ASan: `R_InitSpriteDefs` (r_things.c:191) scans `while (*check != NULL)` but
+  `sprnames` (info.c:40) was `[NUMSPRITES]` with 138 names and NO NULL terminator →
+  reads 1 entry past the array. Benign-by-luck in normal builds (adjacent global
+  happened to read as non-crashing), but a genuine OOB and a hard SIGSEGV under
+  TSan's memory layout (that was the first TSan crash). This is a latent VANILLA
+  bug. Fix: `sprnames[NUMSPRITES + 1]` with a trailing `NULL` (info.c + info.h).
+
+### Bug 2 (real) — data race on the audio stop-flag
+- TSan: `audio_running` written by main thread in `I_ShutdownSound` vs read by the
+  audio thread loop, unsynchronized. `volatile` ≠ thread-safe. Fix: plain `int` with
+  GCC atomic builtins `__atomic_load_n/ store_n` (ACQUIRE/RELEASE) via
+  `AUDIO_RUNNING_LOAD()/STORE()` macros at all 6 sites. (gnu89-compatible.)
+
+### KEY RESULT — the audio locking is correct
+- After the two fixes, both ASan and TSan run **clean** (0 warnings) through 1200
+  AND 3000 ticks with the audio thread hammering. TSan found NO race on the mixer
+  channel arrays (`channels[]`, `channelsend[]`, vol lookups) or `mixbuffer` — the
+  `audio_mutex` around `addsfx` vs `I_UpdateSound` from the prior audio-thread commit
+  is sufficient. The user's "locking issues" were the blocking-ALSA-write freeze
+  (already fixed); no additional lock bug exists in the audio path.
+- Normal `libubodoom.so` rebuilt with all fixes → native/out (needs redeploy).
+- Harness/scripts live in scratchpad (not committed); offered to add reusable
+  `native/scripts/run_sanitizers.sh` + `native/test/harness.c` if wanted.
+
 ## 2026-07-19T21:04:41 — Decoupled audio onto its own thread (supersedes drop-on-full)
 
 ### Why (follow-up to the freeze fix below)

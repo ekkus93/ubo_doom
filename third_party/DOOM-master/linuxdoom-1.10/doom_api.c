@@ -60,6 +60,16 @@ static int g_inited = 0;  // 0=not started, 1=ok, -1=failed
 static sigjmp_buf g_crash_jmp;
 static volatile sig_atomic_t g_crash_jmp_valid = 0;
 
+// Under ASan/TSan we must NOT trap SIGSEGV/SIGBUS: the sanitizer needs to catch
+// faults itself and print a symbolized report. Trapping them here would swallow
+// the very bug the sanitizer is looking for. In a normal build UBO_SIGACTION is
+// just sigaction(); under a sanitizer it is a no-op so faults propagate.
+#if defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__)
+#define UBO_SIGACTION(signum, act, old) ((void)(act), (void)(old))
+#else
+#define UBO_SIGACTION(signum, act, old) sigaction((signum), (act), (old))
+#endif
+
 static void doom_crash_handler(int sig)
 {
     // Print a backtrace before longjmping — this is async-signal-safe enough
@@ -143,16 +153,16 @@ int doom_init(const char* iwad_path)
     sa.sa_handler = doom_crash_handler;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = SA_RESETHAND;  // auto-restore default after first delivery
-    sigaction(SIGSEGV, &sa, &sa_old_segv);
-    sigaction(SIGBUS,  &sa, &sa_old_bus);
+    UBO_SIGACTION(SIGSEGV, &sa, &sa_old_segv);
+    UBO_SIGACTION(SIGBUS,  &sa, &sa_old_bus);
 
     g_crash_jmp_valid = 1;
     if (sigsetjmp(g_crash_jmp, 1) != 0) {
         // SIGSEGV or SIGBUS during init — restore handlers and abort cleanly.
         g_crash_jmp_valid = 0;
         ubo_error_jmp_valid = 0;
-        sigaction(SIGSEGV, &sa_old_segv, NULL);
-        sigaction(SIGBUS,  &sa_old_bus,  NULL);
+        UBO_SIGACTION(SIGSEGV, &sa_old_segv, NULL);
+        UBO_SIGACTION(SIGBUS,  &sa_old_bus,  NULL);
         g_inited = -1;
         fprintf(stderr, "[doom] doom_init aborted via signal (SIGSEGV/SIGBUS)\n");
         return -1;
@@ -164,8 +174,8 @@ int doom_init(const char* iwad_path)
         // I_Error fired during init — abort cleanly without killing the process.
         g_crash_jmp_valid = 0;
         ubo_error_jmp_valid = 0;
-        sigaction(SIGSEGV, &sa_old_segv, NULL);
-        sigaction(SIGBUS,  &sa_old_bus,  NULL);
+        UBO_SIGACTION(SIGSEGV, &sa_old_segv, NULL);
+        UBO_SIGACTION(SIGBUS,  &sa_old_bus,  NULL);
         g_inited = -1;
         fprintf(stderr, "[doom] doom_init aborted via I_Error longjmp\n");
         return -1;
@@ -180,15 +190,15 @@ int doom_init(const char* iwad_path)
 
     g_crash_jmp_valid = 0;
     ubo_error_jmp_valid = 0;
-    sigaction(SIGSEGV, &sa_old_segv, NULL);
-    sigaction(SIGBUS,  &sa_old_bus,  NULL);
+    UBO_SIGACTION(SIGSEGV, &sa_old_segv, NULL);
+    UBO_SIGACTION(SIGBUS,  &sa_old_bus,  NULL);
     g_inited = 1;
 
     // Re-install the crash handler permanently (without SA_RESETHAND) so that
     // SIGSEGV/SIGBUS during doom_tick are also caught instead of killing ubo_app.
     sa.sa_flags = 0;  // persistent, not one-shot
-    sigaction(SIGSEGV, &sa, NULL);
-    sigaction(SIGBUS,  &sa, NULL);
+    UBO_SIGACTION(SIGSEGV, &sa, NULL);
+    UBO_SIGACTION(SIGBUS,  &sa, NULL);
 
     // In library mode we drive ticks manually (singletics path), so set the
     // singletics flag.  This makes every NetUpdate() call in the engine

@@ -26,6 +26,7 @@ A headless port of id Software's `linuxdoom-1.10` that runs as an external servi
 - Config lives in `ubo_service/070-doom/pyproject.toml` (`pythonpath=["."]`, so tests use bare imports like `from doom_controller import ...`).
 - Quick compile check: `.venv/bin/python -m compileall -q ubo_service/070-doom`.
 - Lint the service (ruff, config in the service `pyproject.toml`): `cd ubo_service/070-doom && ../../.venv/bin/ruff check .`.
+- Native sanitizers (memory errors / data races in `libubodoom.so`): `native/scripts/run_sanitizers.sh address|thread [ticks]` builds instrumented Doom objects + `native/test/harness.c` and stress-runs it headless (needs an IWAD; defaults to `$HOME/doom/doom2.wad`, audio at ALSA `null`). Use `thread` for the audio-thread locking, `address` for global/stack/array overruns. Note: ASan is weak for Doom's zone-allocated heap (one big `malloc`, so intra-zone overruns miss redzones). `doom_api.c` skips its SIGSEGV/SIGBUS traps under sanitizer builds so faults reach the sanitizer.
 
 ## Running on the device
 

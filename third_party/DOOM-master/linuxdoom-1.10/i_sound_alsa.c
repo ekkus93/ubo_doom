@@ -40,6 +40,8 @@ rcsid[] = "$Id: i_unix.c,v 1.5 1997/02/03 22:45:10 b1 Exp $";
 
 #include <fcntl.h>
 #include <unistd.h>
+#include <errno.h>
+#include <pthread.h>
 #include <sys/ioctl.h>
 
 // Linux voxware output.
@@ -106,6 +108,16 @@ int 		lengths[NUMSFX];
 // The actual output device.
 int audio_fd;
 static snd_pcm_t* audio_pcm = NULL;
+
+// Decoupled audio output. Sound mixing + the blocking ALSA write run on their
+// own thread so they can never stall the game/render thread. audio_mutex guards
+// the low-level mixer channel arrays (channels[], channelsend[], etc.), which
+// the game thread mutates via addsfx() and the audio thread reads/advances in
+// I_UpdateSound(). See ubo_audio_thread().
+static pthread_t        audio_thread;
+static pthread_mutex_t  audio_mutex = PTHREAD_MUTEX_INITIALIZER;
+static volatile int     audio_running = 0;
+static int              audio_thread_started = 0;
 // The global mixing buffer.
 // Basically, samples from all active internal channels
 //  are modifed and added, and stored in the buffer
@@ -336,6 +348,11 @@ addsfx
     int		rightvol;
     int		leftvol;
 
+    // Serialize against the audio thread's mixer (I_UpdateSound), which reads
+    // and advances these same channel pointers. Without this, a channel pointer
+    // set here could be read half-updated mid-mix (segfault past the sample).
+    pthread_mutex_lock(&audio_mutex);
+
     // Chainsaw troubles.
     // Play these sound effects only one at a time.
     if ( sfxid == sfx_sawup
@@ -418,10 +435,16 @@ addsfx
 
     // Sanity check, clamp volume.
     if (rightvol < 0 || rightvol > 127)
+    {
+	pthread_mutex_unlock(&audio_mutex);
 	I_Error("rightvol out of bounds");
-    
+    }
+
     if (leftvol < 0 || leftvol > 127)
+    {
+	pthread_mutex_unlock(&audio_mutex);
 	I_Error("leftvol out of bounds");
+    }
     
     // Get the proper lookup table piece
     //  for this volume level???
@@ -431,6 +454,8 @@ addsfx
     // Preserve sound SFX id,
     //  e.g. for avoiding duplicates of chainsaw.
     channelids[slot] = sfxid;
+
+    pthread_mutex_unlock(&audio_mutex);
 
     // You tell me.
     return rc;
@@ -707,15 +732,54 @@ void I_UpdateSound( void )
 void
 I_SubmitSound(void)
 {
-  if (!audio_pcm) return;
+  // No-op: audio output no longer runs on the game thread. Mixing and the
+  // (blocking) ALSA write both happen on the dedicated audio thread — see
+  // ubo_audio_thread(). doom_tick() must NOT call this or I_UpdateSound().
+}
 
-  // SAMPLECOUNT is "frames" (each frame = stereo sample = 4 bytes)
-  snd_pcm_sframes_t frames = snd_pcm_writei(audio_pcm, mixbuffer, SAMPLECOUNT);
-  if (frames < 0)
+
+// ---------------------------------------------------------------------------
+// Dedicated audio output thread.
+//
+// Previously doom_tick() called I_UpdateSound()+I_SubmitSound() inline, so a
+// blocking snd_pcm_writei() froze the whole game whenever the ring buffer
+// filled (the engine mixes one 512-frame chunk per game tic, faster than
+// real-time) or the wm8960 hardware pointer stalled. Now the blocking write
+// lives here, where it simply paces this loop to real-time (~21.5 chunks/sec).
+// The game thread only registers sounds (addsfx, under audio_mutex); it never
+// touches ALSA, so it can never stall on audio again — and because pacing is
+// real-time we no longer drop chunks, so audio stays clean.
+// ---------------------------------------------------------------------------
+static void ubo_write_chunk(void)
+{
+  snd_pcm_sframes_t frames;
+
+  frames = snd_pcm_writei(audio_pcm, mixbuffer, SAMPLECOUNT);
+  if (frames < 0 && audio_running)
   {
-    // Try to recover from underruns, etc.
+    // Underrun (-EPIPE), suspend, or IO aborted on shutdown: recover and try
+    // once more. Any failure here only affects audio, never the game thread.
     frames = snd_pcm_recover(audio_pcm, (int)frames, 1);
+    if (frames >= 0 && audio_running)
+      snd_pcm_writei(audio_pcm, mixbuffer, SAMPLECOUNT);
   }
+}
+
+static void* ubo_audio_thread(void* arg)
+{
+  (void)arg;
+  while (audio_running)
+  {
+    // Mix current channel state into mixbuffer under the lock so a sound being
+    // started on the game thread (addsfx) can't tear a channel pointer mid-mix.
+    pthread_mutex_lock(&audio_mutex);
+    I_UpdateSound();
+    pthread_mutex_unlock(&audio_mutex);
+
+    // Blocking write outside the lock: this is what paces us to real-time.
+    ubo_write_chunk();
+  }
+  return NULL;
 }
 
 
@@ -743,9 +807,18 @@ I_UpdateSoundParams
 void
 I_ShutdownSound(void)
 {
+  if (audio_thread_started)
+  {
+    // Signal the thread to stop, then abort any in-flight blocking write
+    // (snd_pcm_drop) so it wakes immediately, and join it.
+    audio_running = 0;
+    if (audio_pcm)
+      snd_pcm_drop(audio_pcm);
+    pthread_join(audio_thread, NULL);
+    audio_thread_started = 0;
+  }
   if (audio_pcm)
   {
-    snd_pcm_drain(audio_pcm);
     snd_pcm_close(audio_pcm);
     audio_pcm = NULL;
   }
@@ -815,6 +888,21 @@ I_InitSound()
     audio_pcm = NULL;
     return;
   }
+
+  // Keep the device in blocking mode: the audio thread's blocking write is what
+  // paces sound output to real-time. Output runs on its own thread (never the
+  // game/render thread), so blocking here is harmless to gameplay.
+  audio_running = 1;
+  if (pthread_create(&audio_thread, NULL, ubo_audio_thread, NULL) != 0)
+  {
+    fprintf(stderr, "ALSA: failed to start audio thread; sound disabled\n");
+    audio_running = 0;
+    snd_pcm_close(audio_pcm);
+    audio_pcm = NULL;
+    return;
+  }
+  audio_thread_started = 1;
+  fprintf(stderr, "ALSA: audio output thread started\n");
 }
 
 

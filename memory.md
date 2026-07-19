@@ -4,6 +4,77 @@
 
 ---
 
+## 2026-07-19T21:04:41 — Decoupled audio onto its own thread (supersedes drop-on-full)
+
+### Why (follow-up to the freeze fix below)
+- The earlier fix (non-blocking write + drop chunk on -EAGAIN) stopped the freeze
+  but, because the engine over-produces audio (~1.39× real-time), it dropped ~1/4
+  of chunks → choppy SFX. User asked for the proper decoupled version.
+
+### Design — dedicated audio output thread (`i_sound_alsa.c`)
+- Sound **mixing + the blocking ALSA write** now run on their own pthread
+  (`ubo_audio_thread`): loop = mix one 512-frame chunk under `audio_mutex`, then
+  blocking `snd_pcm_writei` OUTSIDE the lock. The blocking write paces the loop to
+  real-time (~21.5 chunks/s), so audio plays cleanly with **no drops** and the
+  game/render thread never touches ALSA.
+- Device kept in **blocking** mode (reverted the non-blocking change); blocking is
+  now safe because it only stalls the audio thread, never the game.
+- Thread-safety: the low-level mixer channel arrays (`channels[]`, `channelsend[]`,
+  vol lookups) are written by the game thread only in `addsfx()` and read/advanced
+  by the audio thread only in `I_UpdateSound()`. `addsfx()` now takes `audio_mutex`
+  (unlocks at all 3 exits incl. the two I_Error paths). `I_StartSound`→`addsfx` is
+  the sole game-thread mutator; `I_StopSound` is a no-op; `I_SoundIsPlaying` only
+  reads gametic — so those need no lock.
+- `doom_tick()` (doom_api.c) no longer calls `I_UpdateSound()`/`I_SubmitSound()`.
+  `I_SubmitSound()` is now a no-op stub. (`d_main.c`'s copies live in D_DoomLoop,
+  which library mode never enters.)
+- Lifecycle: thread spawned at end of `I_InitSound` (`audio_running=1` +
+  `pthread_create`); `I_ShutdownSound` sets `audio_running=0`, `snd_pcm_drop` to
+  abort the in-flight blocking write, `pthread_join`, then close. `ubo_write_chunk`
+  guards its recover/retry with `audio_running` so shutdown can't re-block.
+- Makefile: `UBO_LIBS += -lpthread`. Added `#include <pthread.h>`, `<errno.h>`.
+- Built clean (only pre-existing `rcsid` warning); `-lpthread` on link line; pthread
+  syms bind to glibc; 33 Python tests still pass. New `.so` in `native/out/` (also
+  bundles usergame + weapon-next). **Requires rebuild+redeploy of libubodoom.so.**
+- Caveat / future: if the wm8960 hw pointer ever wedges, the audio thread blocks
+  (audio dies until restart) but the game keeps running. A watchdog on the write
+  could recover audio automatically — not done.
+
+## 2026-07-19T21:04:40 — Fix long-session freeze: blocking ALSA write stalled the render thread
+
+### Symptom
+- User: "Doom plays ok for a while but after a while it crashes… I think there's a
+  memory leak." On follow-up: **not** an app-wide OOM — Doom *freezes*, then "after
+  pressing some buttons it sort of works, then Doom resets." One continuous session.
+
+### Root cause (NOT a leak)
+- Ruled out leaks: Python service has no unbounded growth (input queue drained every
+  tick, `_held` bounded, frame bytes GC'd after dispatch); native per-frame paths use
+  static buffers; sound is pre-cached at init; zone heap is fixed 32 MB. (The only
+  real leak is `doom_reset()` leaking the 32 MB zone per crash/reopen cycle — not this
+  bug, since the report is a single session.)
+- Actual cause: `I_SubmitSound()` (`i_sound_alsa.c`) runs on the **same thread that
+  renders**, and the PCM was opened in **blocking** mode (`snd_pcm_open(..., 0)`). The
+  engine mixes one 512-frame chunk per game tic = 512/11025 ≈ 46 ms of audio, and the
+  tick loop targets 30 fps ⇒ ~1.39× real-time audio production. When the wm8960 ring
+  buffer saturates (or the hw pointer stalls), `snd_pcm_writei` **blocks the render
+  thread** → screen freezes until the write unblocks/errors → lurch forward / "reset".
+- Vanilla linuxdoom avoided this by running sound in a **separate forked `sndserver`
+  process**; this port made it synchronous/inline, so audio back-pressures the game.
+
+### Fix (native — MUST rebuild + redeploy libubodoom.so)
+- `i_sound_alsa.c`: after `snd_pcm_set_params`, call `snd_pcm_nonblock(audio_pcm, 1)`.
+- Rewrote `I_SubmitSound`: non-blocking `snd_pcm_writei`; on `-EAGAIN` (buffer full)
+  **drop the 512-frame chunk** and return; on other errors `snd_pcm_recover` + one
+  non-blocking retry; partial writes not retried. The render thread now never blocks
+  in ALSA. Added `#include <errno.h>`.
+- Tradeoff: because we still over-produce audio, ~1/4 of chunks get dropped → slightly
+  choppy SFX. Acceptable vs. freezing. A fuller fix would decouple audio onto its own
+  thread with a real-time-paced ring buffer (future work).
+- Built clean via `./native/scripts/build_libubodoom.sh` (only the pre-existing unused
+  `rcsid` warning). New `.so` in `native/out/` — bundles the earlier undeployed
+  usergame + weapon-next native changes too, so one redeploy covers everything.
+
 ## 2026-07-19T16:22:06 — Fix "can't start game": demo misdetected as gameplay + turn-reversal
 
 ### Root cause (start-game bug)

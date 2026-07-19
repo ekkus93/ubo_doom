@@ -281,8 +281,9 @@ void doom_tick(void)
 
     D_Display();
 
-    I_UpdateSound();
-    I_SubmitSound();
+    // Sound mixing + output run on a dedicated audio thread (see
+    // i_sound_alsa.c); doom_tick() must not touch ALSA or it could block the
+    // render thread. S_UpdateSounds() above already updated channel params.
 
     g_crash_jmp_valid = 0;
     ubo_error_jmp_valid = 0;

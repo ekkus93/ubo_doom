@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from enum import IntEnum
 
 from native.doom_lib import UboKey
 
@@ -12,11 +13,29 @@ GS_FINALE = 2
 GS_DEMOSCREEN = 3
 
 
-class DoomController:
-    """Map Ubo's five gameplay buttons to Doom's keyboard interface.
+class DownMode(IntEnum):
+    """What the DOWN button does during active gameplay.
 
-    BACK and HOME are intentionally not handled here. Ubo v2 owns those buttons:
-    BACK closes the current render view and HOME returns to Ubo's home screen.
+    Turning (L2/L3) and moving forward (UP) are always live; the DOWN button is
+    multiplexed through these functions, cycled by the MODE button (L1). Values
+    are in cycle order, so advancing is ``(mode + 1) % len(DownMode)``.
+    """
+
+    FIRE = 0
+    USE = 1
+    BACK = 2
+    WEAPON = 3
+
+
+class DoomController:
+    """Map Ubo's five inputs (UP, DOWN, L1, L2, L3) to Doom's keyboard interface.
+
+    Turning is always available: L2 turns left and L3 turns right during
+    gameplay. Forward is always UP. The DOWN button is multiplexed through
+    :class:`DownMode` (fire / use / back / next-weapon), cycled by L1 (MODE), so
+    the player can turn and shoot at once without giving up turning.
+
+    BACK and HOME are intentionally not handled here — Ubo v2 owns those.
     """
 
     def __init__(self, tap_fn: Callable[[UboKey, int], None]) -> None:
@@ -25,7 +44,7 @@ class DoomController:
         self._gamestate = GS_DEMOSCREEN
         self._in_level = False
         self._menu_active = False
-        self._alt_mode = False
+        self._down_mode = DownMode.FIRE
 
     @property
     def in_level(self) -> bool:
@@ -36,8 +55,8 @@ class DoomController:
         return self._menu_active
 
     @property
-    def alt_mode(self) -> bool:
-        return self._alt_mode
+    def down_mode(self) -> DownMode:
+        return self._down_mode
 
     @property
     def gamestate(self) -> int:
@@ -69,32 +88,36 @@ class DoomController:
         return was_in_level and not in_level
 
     def go_up(self) -> None:
+        """UP always moves forward."""
         self._tap(UboKey.UP, hold_ticks=8)
 
     def go_down(self) -> None:
-        self._tap(UboKey.DOWN, hold_ticks=8)
+        """DOWN moves the menu cursor outside gameplay; in a level it follows the
+        current :class:`DownMode` (fire / use / back / next-weapon)."""
+        if not self._in_level:
+            self._tap(UboKey.DOWN, hold_ticks=8)
+        elif self._down_mode is DownMode.BACK:
+            self._tap(UboKey.DOWN, hold_ticks=8)
+        elif self._down_mode is DownMode.USE:
+            self._tap(UboKey.USE)
+        elif self._down_mode is DownMode.WEAPON:
+            self._tap(UboKey.WEAPON_NEXT)
+        else:  # DownMode.FIRE
+            self._tap(UboKey.FIRE)
 
     def btn_l2(self) -> None:
-        """Normal mode turns left; alternate mode uses doors and switches."""
-        if self._alt_mode and self._in_level:
-            self._tap(UboKey.USE)
-        else:
-            self._tap(UboKey.LEFT, hold_ticks=12)
+        """L2 always turns left."""
+        self._tap(UboKey.LEFT, hold_ticks=12)
 
     def btn_l3(self) -> None:
-        """Context-sensitive right/select/open-menu/fire action.
+        """L3 turns right during gameplay; otherwise it drives the menus.
 
-        Normal mode:
+        - Doom menu open: select
         - gameplay: turn right
-        - Doom menu: select
         - intermission/finale: continue
         - title/demo: open the Doom menu
-
-        Alternate mode during gameplay: fire.
         """
-        if self._alt_mode and self._in_level:
-            self._tap(UboKey.FIRE)
-        elif self._menu_active:
+        if self._menu_active:
             self._tap(UboKey.MENU_SELECT)
         elif self._in_level:
             self._tap(UboKey.RIGHT, hold_ticks=12)
@@ -103,18 +126,24 @@ class DoomController:
         else:
             self._tap(UboKey.ESCAPE)
 
-    def toggle_mode(self) -> bool:
-        """Toggle alternate controls while actively playing a level."""
+    def cycle_mode(self) -> bool:
+        """Advance the DOWN button's function; only while actively in a level.
+
+        Returns True if the mode changed (so the caller can update the display).
+        """
         if not self._in_level:
             return False
-        self._alt_mode = not self._alt_mode
+        self._down_mode = DownMode((self._down_mode + 1) % len(DownMode))
         return True
 
     def exit_level(self) -> bool:
-        """Reset alternate mode after leaving active gameplay."""
-        if not self._alt_mode:
+        """Reset the DOWN button to FIRE after leaving active gameplay.
+
+        Returns True if the mode actually changed.
+        """
+        if self._down_mode is DownMode.FIRE:
             return False
-        self._alt_mode = False
+        self._down_mode = DownMode.FIRE
         return True
 
     def _tap(self, key: UboKey, hold_ticks: int = 2) -> None:

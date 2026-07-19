@@ -22,6 +22,7 @@ from ubo_app.store.core.types import (
     RenderStackItem,
     StackChangedEvent,
     StackPopAction,
+    UpdateRenderPropsAction,
 )
 from ubo_app.store.main import store
 
@@ -33,8 +34,8 @@ DOOM_STREAM_ID: Final = "doom:video"
 DOOM_OPEN_ACTION_ID: Final = "doom:open"
 DOOM_RENDER_ITEMS: Final = (
     MenuItemData(key="doom:mode", label="MODE", icon=""),
-    MenuItemData(key="doom:left-use", label="LEFT/USE", icon=""),
-    MenuItemData(key="doom:right-fire", label="RIGHT/FIRE", icon=""),
+    MenuItemData(key="doom:left", label="◄", icon=""),
+    MenuItemData(key="doom:right", label="►", icon=""),
 )
 _OPPOSITE: Final = {
     UboKey.UP: UboKey.DOWN,
@@ -94,6 +95,7 @@ class DoomSession:
         self._rgba: np.ndarray | None = None
         self._visible = False
         self._closed = False
+        self._mode_title = "Doom"
 
         self._fps = _positive_float("UBO_DOOM_FPS", 30.0)
         render_fps = min(self._fps, _positive_float("UBO_DOOM_RENDER_FPS", 15.0))
@@ -168,11 +170,26 @@ class DoomSession:
 
     def button(self, index: int) -> None:
         if index == 0:
-            self._controller.toggle_mode()
+            self._controller.cycle_mode()
         elif index == 1:
             self._controller.btn_l2()
         elif index == 2:
             self._controller.btn_l3()
+
+    def _sync_mode_title(self) -> None:
+        """Reflect the DOWN-button mode in the view title (updates live).
+
+        The footer button labels are fixed at open time, so the title bar is the
+        only place we can show which action DOWN currently performs.
+        """
+        if self._controller.in_level:
+            title = f"Doom · {self._controller.down_mode.name}"
+        else:
+            title = "Doom"
+        if title == self._mode_title:
+            return
+        self._mode_title = title
+        store.dispatch(UpdateRenderPropsAction(stream_id=DOOM_STREAM_ID, title=title))
 
     def _initialize(self) -> None:
         doom: DoomLib | None = None
@@ -272,6 +289,7 @@ class DoomSession:
                 )
                 if left_level:
                     self._controller.exit_level()
+                self._sync_mode_title()
                 if not alive:
                     raise RuntimeError("native Doom engine stopped")
                 if frame % self._render_every == 0:

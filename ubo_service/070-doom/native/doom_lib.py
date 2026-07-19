@@ -31,6 +31,8 @@ class UboKey(IntEnum):
     ESCAPE = 7
     # maps to KEY_ENTER — only safe for menus (not in-game: stolen by HU_MSGREFRESH)
     MENU_SELECT = 8
+    # not a real key: the native lib cycles to the next owned weapon on key_down
+    WEAPON_NEXT = 9
 
 
 @dataclass(frozen=True)

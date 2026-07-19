@@ -297,10 +297,38 @@ void doom_shutdown(void)
     g_inited = 0;
 }
 
+/* Switch the console player to the next weapon they own, wrapping around.
+   Mirrors what pressing a number key does (sets pendingweapon); there is no
+   weapon-cycle key in vanilla Doom, so we implement it here. */
+static void ubo_weapon_next(void)
+{
+    player_t* p;
+    int cur, i, w;
+    if (g_inited != 1)
+        return;
+    p = &players[consoleplayer];
+    cur = (p->pendingweapon != wp_nochange) ? (int)p->pendingweapon : (int)p->readyweapon;
+    for (i = 1; i <= NUMWEAPONS; i++)
+    {
+        w = (cur + i) % NUMWEAPONS;
+        if (p->weaponowned[w])
+        {
+            p->pendingweapon = (weapontype_t)w;
+            break;
+        }
+    }
+}
+
 void doom_key_down(ubo_key_t key)
 {
-    int doom_key = map_ubo_key(key);
+    int doom_key;
     event_t ev;
+    if (key == UBO_KEY_WEAPON_NEXT)
+    {
+        ubo_weapon_next();
+        return;
+    }
+    doom_key = map_ubo_key(key);
     fprintf(stderr, "[doom] key_down ubo=%d doom=0x%02x\n", (int)key, doom_key);
     ev.type = ev_keydown;
     ev.data1 = doom_key;
@@ -311,8 +339,11 @@ void doom_key_down(ubo_key_t key)
 
 void doom_key_up(ubo_key_t key)
 {
-    int doom_key = map_ubo_key(key);
+    int doom_key;
     event_t ev;
+    if (key == UBO_KEY_WEAPON_NEXT)
+        return;  /* momentary action, no key-up to post */
+    doom_key = map_ubo_key(key);
     fprintf(stderr, "[doom] key_up   ubo=%d doom=0x%02x\n", (int)key, doom_key);
     ev.type = ev_keyup;
     ev.data1 = doom_key;

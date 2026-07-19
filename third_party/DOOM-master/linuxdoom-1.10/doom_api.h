@@ -28,6 +28,7 @@ typedef enum ubo_key_e {
     UBO_KEY_USE = 6,      // maps to Space
     UBO_KEY_ESCAPE = 7,        // maps to Esc
     UBO_KEY_MENU_SELECT = 8,  // maps to KEY_ENTER — only safe for menus, not in-game
+    UBO_KEY_WEAPON_NEXT = 9,  // not a real key: cycles to the next owned weapon
 } ubo_key_t;
 
 void doom_key_down(ubo_key_t key);

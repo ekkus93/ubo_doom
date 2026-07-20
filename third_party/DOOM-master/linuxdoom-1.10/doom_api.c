@@ -324,7 +324,6 @@ void doom_key_down(ubo_key_t key)
         return;
     }
     doom_key = ubo_map_key(key);
-    fprintf(stderr, "[doom] key_down ubo=%d doom=0x%02x\n", (int)key, doom_key);
     ev.type = ev_keydown;
     ev.data1 = doom_key;
     ev.data2 = 0;
@@ -339,7 +338,6 @@ void doom_key_up(ubo_key_t key)
     if (key == UBO_KEY_WEAPON_NEXT)
         return;  /* momentary action, no key-up to post */
     doom_key = ubo_map_key(key);
-    fprintf(stderr, "[doom] key_up   ubo=%d doom=0x%02x\n", (int)key, doom_key);
     ev.type = ev_keyup;
     ev.data1 = doom_key;
     ev.data2 = 0;

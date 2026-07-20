@@ -33,8 +33,12 @@ A headless port of id Software's `linuxdoom-1.10` that runs as an external servi
 
 ## Running on the device
 
-- The systemd **user** unit is named `ubo-app`, but the executable is `/opt/ubo/env/bin/ubo` — **`ubo-app` is not a runnable command on v2.** Manage via `systemctl --user restart ubo-app`, logs via `journalctl --user -u ubo-app`.
-- Manual debug: stop the service, `source system/env/ubo_app.env.example`, then run `/opt/ubo/env/bin/ubo`.
+- The systemd **user** unit is named `ubo-app`, but the executable is `/opt/ubo/env/bin/ubo` — **`ubo-app` is not a runnable command on v2.** Manage via `systemctl --user restart ubo-app`.
+- **Logs.** Two separate sinks, and `journalctl --user -u ubo-app` is a trap — it returns "No journal files were found" because the `ubo` user can't read the journal (`Storage=volatile`, kept in RAM at `/run/log/journal`, readable only by the `adm`/`systemd-journal` groups). Use the **system** journal filtered by the user unit instead:
+  - `journalctl _SYSTEMD_USER_UNIT=ubo-app.service` — full output (add `-f` to follow live, `-n 100` to tail).
+  - `journalctl _SYSTEMD_USER_UNIT=ubo-app.service | grep '\[doom\]'` — Doom lines only.
+  - `/opt/ubo/ubo-app.log` is **Python logging only** (the `[INFO] …` lines). The engine's native `fprintf(stdout/stderr)` — anything printed by the C code, e.g. `[doom] …` — goes to the **journal** (the process's fd 1/2 are the journald `stdout` socket), *not* to `ubo-app.log`. So to see native Doom output you must read the journal, not the file.
+- Manual debug: stop the service, `source system/env/ubo_app.env.example`, then run `/opt/ubo/env/bin/ubo` (now the native stdout/stderr land in your terminal directly).
 - The Python service is **symlinked** onto the device (Python edits are live), but **native changes require rebuilding and re-copying `libubodoom.so`**.
 - Required env vars: `UBO_SERVICES_PATH` (colon-separated — preserve existing entries), `UBO_DOOM_LIB`, `UBO_DOOM_IWAD`. Recommended: `UBO_DOOM_CWD`, `UBO_DOOM_CONFIG` (avoid stale-config bugs).
 

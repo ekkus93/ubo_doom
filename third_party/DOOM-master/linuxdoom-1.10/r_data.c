@@ -558,12 +558,6 @@ void R_InitTextures (void)
 	strncpy (name,name_p+i*8, 8);
 	patchlookup[i] = W_CheckNumForName (name);
     }
-    {
-	int found = 0;
-	for (i=0; i<nummappatches; i++) found += (patchlookup[i] >= 0);
-	fprintf(stderr, "[doom] R_InitTextures: nummappatches=%d found=%d/%d\n",
-		nummappatches, found, nummappatches);
-    }
     Z_Free (names);
     
     // Load the map texture definitions from textures.lmp.
@@ -703,19 +697,15 @@ void R_InitTextures (void)
     if (maptex2)
 	Z_Free (maptex2);
     
-    // Precalculate whatever possible.	
-    fprintf(stderr, "[doom] R_InitTextures: numtextures=%d, running R_GenerateLookup...\n",
-	    numtextures);
+    // Precalculate whatever possible.
     for (i=0 ; i<numtextures ; i++)
 	R_GenerateLookup (i);
-    fprintf(stderr, "[doom] R_InitTextures: R_GenerateLookup loop done\n");
 
     // Create translation table for global animation.
     texturetranslation = Z_Malloc ((numtextures+1)*4, PU_STATIC, 0);
-    
+
     for (i=0 ; i<numtextures ; i++)
 	texturetranslation[i] = i;
-    fprintf(stderr, "[doom] R_InitTextures: complete\n");
 }
 
 
@@ -768,7 +758,6 @@ void R_InitSpriteLumps (void)
 	spriteoffset[i] = SHORT(patch->leftoffset)<<FRACBITS;
 	spritetopoffset[i] = SHORT(patch->topoffset)<<FRACBITS;
     }
-    fprintf(stderr, "[doom] R_InitSpriteLumps: done (%d lumps)\n", numspritelumps);
 }
 
 

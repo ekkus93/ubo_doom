@@ -99,9 +99,6 @@ void Z_Init (void)
     mainzone = (memzone_t *)I_ZoneBase (&size);
     mainzone->size = size;
 
-    fprintf(stderr, "[doom] Z_Init: sizeof(memblock_t)=%zu sizeof(memzone_t)=%zu zone=%p size=%d\n",
-	    sizeof(memblock_t), sizeof(memzone_t), (void*)mainzone, size);
-
     // set the entire zone to one free block
     mainzone->blocklist.next =
 	mainzone->blocklist.prev =

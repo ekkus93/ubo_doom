@@ -648,47 +648,34 @@ P_SetupLevel
 	
     leveltime = 0;
 	
-    // note: most of this ordering is important	
-    fprintf(stderr, "[doom] P_SetupLevel: before P_LoadBlockMap\n");
+    // note: most of this ordering is important
     P_LoadBlockMap (lumpnum+ML_BLOCKMAP);
     Z_CheckHeap();
-    fprintf(stderr, "[doom] P_SetupLevel: after P_LoadBlockMap\n");
     P_LoadVertexes (lumpnum+ML_VERTEXES);
     Z_CheckHeap();
-    fprintf(stderr, "[doom] P_SetupLevel: after P_LoadVertexes\n");
     P_LoadSectors (lumpnum+ML_SECTORS);
     Z_CheckHeap();
-    fprintf(stderr, "[doom] P_SetupLevel: after P_LoadSectors\n");
     P_LoadSideDefs (lumpnum+ML_SIDEDEFS);
     Z_CheckHeap();
-    fprintf(stderr, "[doom] P_SetupLevel: after P_LoadSideDefs\n");
 
     P_LoadLineDefs (lumpnum+ML_LINEDEFS);
     Z_CheckHeap();
-    fprintf(stderr, "[doom] P_SetupLevel: after P_LoadLineDefs\n");
     P_LoadSubsectors (lumpnum+ML_SSECTORS);
     Z_CheckHeap();
-    fprintf(stderr, "[doom] P_SetupLevel: after P_LoadSubsectors\n");
     P_LoadNodes (lumpnum+ML_NODES);
     Z_CheckHeap();
-    fprintf(stderr, "[doom] P_SetupLevel: after P_LoadNodes\n");
     P_LoadSegs (lumpnum+ML_SEGS);
     Z_CheckHeap();
-    fprintf(stderr, "[doom] P_SetupLevel: after P_LoadSegs\n");
-	
+
     rejectmatrix = W_CacheLumpNum (lumpnum+ML_REJECT,PU_LEVEL);
     Z_CheckHeap();
-    fprintf(stderr, "[doom] P_SetupLevel: after ML_REJECT\n");
     P_GroupLines ();
     Z_CheckHeap();
-    fprintf(stderr, "[doom] P_SetupLevel: after P_GroupLines\n");
 
     bodyqueslot = 0;
     deathmatch_p = deathmatchstarts;
-    fprintf(stderr, "[doom] P_SetupLevel: before P_LoadThings\n");
     P_LoadThings (lumpnum+ML_THINGS);
     Z_CheckHeap();
-    fprintf(stderr, "[doom] P_SetupLevel: after P_LoadThings\n");
     
     // if deathmatch, randomly spawn the active players
     if (deathmatch)

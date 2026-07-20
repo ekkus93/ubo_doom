@@ -25,6 +25,7 @@ class DownMode(IntEnum):
     USE = 1
     BACK = 2
     WEAPON = 3
+    MENU = 4
 
 
 class DoomController:
@@ -32,8 +33,8 @@ class DoomController:
 
     Turning is always available: L2 turns left and L3 turns right during
     gameplay. Forward is always UP. The DOWN button is multiplexed through
-    :class:`DownMode` (fire / use / back / next-weapon), cycled by L1 (MODE), so
-    the player can turn and shoot at once without giving up turning.
+    :class:`DownMode` (fire / use / back / next-weapon / open-menu), cycled by L1
+    (MODE), so the player can turn and shoot at once without giving up turning.
 
     BACK and HOME are intentionally not handled here — Ubo v2 owns those.
     """
@@ -93,7 +94,7 @@ class DoomController:
 
     def go_down(self) -> None:
         """DOWN moves the menu cursor outside gameplay; in a level it follows the
-        current :class:`DownMode` (fire / use / back / next-weapon)."""
+        current :class:`DownMode` (fire / use / back / next-weapon / open-menu)."""
         if not self._in_level:
             self._tap(UboKey.DOWN, hold_ticks=8)
         elif self._down_mode is DownMode.BACK:
@@ -102,8 +103,28 @@ class DoomController:
             self._tap(UboKey.USE)
         elif self._down_mode is DownMode.WEAPON:
             self._tap(UboKey.WEAPON_NEXT)
+        elif self._down_mode is DownMode.MENU:
+            # Open the Doom (ESC) menu from within a level. BACK/HOME belong to
+            # Ubo v2 navigation and leave the app, so this is the only in-game
+            # path to Doom's own menu.
+            self._tap(UboKey.ESCAPE)
         else:  # DownMode.FIRE
             self._tap(UboKey.FIRE)
+
+    def btn_l1(self) -> bool:
+        """L1 cycles the DOWN-mode during play; while a Doom menu is open it sends
+        ESC to back out / close it.
+
+        This is what makes the menu a clean round-trip: BACK/HOME belong to Ubo v2
+        and leave the whole app, so once you've opened Doom's menu (DOWN in MENU
+        mode) L1 is the only in-app way to close it and resume. It also gives the
+        title-screen menu a working "back out". Returns whatever :meth:`cycle_mode`
+        would (False when it only sends ESC), so the caller can refresh the HUD.
+        """
+        if self._menu_active:
+            self._tap(UboKey.ESCAPE)
+            return False
+        return self.cycle_mode()
 
     def btn_l2(self) -> None:
         """L2 always turns left."""

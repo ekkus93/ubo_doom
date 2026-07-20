@@ -94,6 +94,29 @@ class TestMovement:
         assert rec.calls[-1] == (UboKey.DOWN, 8)
 
 
+class TestL1:
+    def test_cycles_mode_during_gameplay(self, ctrl: DoomController) -> None:
+        set_level(ctrl)
+        assert ctrl.down_mode is DownMode.FIRE
+        assert ctrl.btn_l1() is True
+        assert ctrl.down_mode is DownMode.USE
+
+    def test_closes_menu_with_escape_when_menu_open(
+        self,
+        ctrl: DoomController,
+        rec: Recorder,
+    ) -> None:
+        set_menu(ctrl)
+        assert ctrl.btn_l1() is False
+        assert rec.last_key is UboKey.ESCAPE
+
+    def test_does_not_cycle_mode_while_menu_open(self, ctrl: DoomController) -> None:
+        set_menu(ctrl)
+        before = ctrl.down_mode
+        ctrl.btn_l1()
+        assert ctrl.down_mode is before  # sent ESC to close, did not cycle
+
+
 class TestL2:
     def test_turns_left(self, ctrl: DoomController, rec: Recorder) -> None:
         set_level(ctrl)
@@ -214,6 +237,7 @@ class TestDownButton:
             DownMode.USE: UboKey.USE,
             DownMode.BACK: UboKey.DOWN,
             DownMode.WEAPON: UboKey.WEAPON_NEXT,
+            DownMode.MENU: UboKey.ESCAPE,
         }
         seen: dict[DownMode, UboKey] = {}
         for _ in range(len(DownMode)):
@@ -225,10 +249,16 @@ class TestDownButton:
 
 
 class TestModeLifecycle:
-    def test_mode_cycles_fire_use_back_weapon(self, ctrl: DoomController) -> None:
+    def test_mode_cycles_fire_use_back_weapon_menu(self, ctrl: DoomController) -> None:
         set_level(ctrl)
         assert ctrl.down_mode is DownMode.FIRE
-        order = [DownMode.USE, DownMode.BACK, DownMode.WEAPON, DownMode.FIRE]
+        order = [
+            DownMode.USE,
+            DownMode.BACK,
+            DownMode.WEAPON,
+            DownMode.MENU,
+            DownMode.FIRE,
+        ]
         for expected in order:
             assert ctrl.cycle_mode() is True
             assert ctrl.down_mode is expected

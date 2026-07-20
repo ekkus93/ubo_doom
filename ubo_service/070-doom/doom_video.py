@@ -36,6 +36,7 @@ _GLYPHS: Final[dict[str, tuple[int, int, int, int, int]]] = {
     "P": (30, 17, 30, 16, 16),
     "O": (14, 17, 17, 17, 14),
     "N": (17, 25, 21, 19, 17),
+    "M": (17, 27, 21, 17, 17),
 }
 _GLYPH_W: Final[int] = 5
 _GLYPH_H: Final[int] = 5

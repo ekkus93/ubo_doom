@@ -218,7 +218,7 @@ See [`docs/CONTROLS.md`](docs/CONTROLS.md) for the full description.
 | UP | Move forward |
 | L2 | Turn left |
 | L3 | Turn right |
-| L1 (MODE) | Cycle what DOWN does: **FIRE → USE → BACK → WEAPON** (wraps) |
+| L1 (MODE) | Cycle what DOWN does: **FIRE → USE → BACK → WEAPON → MENU** (wraps) |
 | DOWN | Perform the current mode's action (see below) |
 
 DOWN by mode:
@@ -229,9 +229,16 @@ DOWN by mode:
 | USE | Use — open doors, flip switches |
 | BACK | Move backward |
 | WEAPON | Switch to your next owned weapon |
+| MENU | Open Doom's own (ESC) menu — New Game, Options, Quit |
 
-While DOWN is set to FIRE / USE / WEAPON you cannot move backward — turn 180° and
-walk forward instead. The mode resets to FIRE whenever you leave a level.
+While DOWN is set to FIRE / USE / WEAPON / MENU you cannot move backward — turn
+180° and walk forward instead. The mode resets to FIRE whenever you leave a level.
+
+**Reaching Doom's menu:** the Ubo **BACK** button leaves the Doom app entirely
+(Ubo v2 owns BACK/HOME for navigation), so it can't open Doom's in-game menu. Use
+the **MENU** mode instead: cycle L1 to MENU, press DOWN to open the menu, then
+drive it with UP/DOWN (cursor) and L3 (select). Press **L1** to back out / close
+the menu and resume — L1 doubles as "back" whenever a menu is open.
 
 ### Respawning after death
 

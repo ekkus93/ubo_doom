@@ -51,6 +51,7 @@ _MODE_COLORS: Final[dict[DownMode, tuple[int, int, int]]] = {
     DownMode.USE: (90, 220, 120),
     DownMode.BACK: (120, 190, 255),
     DownMode.WEAPON: (255, 210, 80),
+    DownMode.MENU: (200, 120, 255),
 }
 
 
@@ -176,7 +177,7 @@ class DoomSession:
 
     def button(self, index: int) -> None:
         if index == 0:
-            self._controller.cycle_mode()
+            self._controller.btn_l1()
         elif index == 1:
             self._controller.btn_l2()
         elif index == 2:

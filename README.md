@@ -233,6 +233,14 @@ DOWN by mode:
 While DOWN is set to FIRE / USE / WEAPON you cannot move backward — turn 180° and
 walk forward instead. The mode resets to FIRE whenever you leave a level.
 
+### Respawning after death
+
+When you die, the view drops to the floor. After about a second, press **DOWN**
+(FIRE — the default mode) or **USE** to respawn, which restarts the current level.
+Because FIRE is the default, a plain DOWN press brings you back — no mode cycling
+needed. The short delay is deliberate: it stops a fire button still held at the
+moment of death from skipping the death view.
+
 ### Menus (title screen, Doom menu, intermission)
 
 | Button | Doom action |

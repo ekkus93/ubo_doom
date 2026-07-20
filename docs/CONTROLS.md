@@ -40,6 +40,17 @@ BACK to reposition. The mode resets to FIRE whenever you leave a level.
 turn 180° and walk forward instead. This is the cost of never tying up the turn
 keys, which keeps turn-and-shoot possible on only five buttons.
 
+## Respawning after death
+
+When you die, the camera sinks to the floor. After roughly a second, press
+**DOWN** (FIRE, the default mode) or **USE** to respawn — this reloads the current
+level from the start. Since FIRE is the default DOWN action, a plain DOWN press is
+enough; you don't have to cycle to USE. The ~1 s delay is intentional: it keeps
+the death view from being skipped if the fire button is still held when you die.
+
+Vanilla Doom respawns on USE only; this port also accepts FIRE so the natural
+action button works when you're dead.
+
 ## Menus (title screen, Doom menu, intermission)
 
 Outside active gameplay the buttons drive the menus:

@@ -4,6 +4,32 @@
 
 ---
 
+## 2026-07-20T15:45:36 — Added pure-logic C unit tests for the Ubo seams
+
+### What
+First C-side unit tests. Extracted the two Ubo-authored bits of logic that are
+easy to break and expensive to catch on-device into dependency-free translation
+units, then tested them without linking the engine:
+- `ubo_keymap.c` / `ubo_keymap.h` — `ubo_map_key()` (was `static map_ubo_key` in
+  `doom_api.c`). Pins the stable-key→doomkey table: USE→space (the respawn/use
+  path), FIRE→KEY_RCTRL (never KEY_ENTER, which HU_MSGREFRESH eats), etc.
+- `ubo_weapon.c` / `ubo_weapon.h` — `ubo_next_owned_weapon(cur, n, owned)`, the
+  cyclic weapon-cycle scan pulled out of `ubo_weapon_next()`. Off-by-one prone;
+  now tested for wrap, skip-unowned, single-owned no-op, none-owned.
+
+`doom_api.c` now delegates to both (keeps the `g_inited`/`players[]` glue; passes
+`(const int*)p->weaponowned` since `boolean` is an int-sized enum here).
+
+### How to run
+`native/scripts/run_unit_tests.sh` (or `make test-units` in the vendored tree).
+Runner: `native/test/test_ubo_units.c` — no framework, assert-style, exit code =
+failure count. 21 checks, all pass. Makefile links the two new .o into
+`libubodoom.so`; `.so` rebuilds clean with `-Wall`, no warnings. These are the
+right tool for pure logic; the death→reborn→level-reload path and audio-thread
+locking stay with `run_sanitizers.sh` (stateful/concurrent).
+
+---
+
 ## 2026-07-19T21:xx — Sanitizer pass (ASan + TSan): verified locking, fixed 2 real bugs
 
 ### Setup

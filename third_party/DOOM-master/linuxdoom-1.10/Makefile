@@ -100,6 +100,7 @@ UBO_LIBS=-lasound -lm -lpthread
 UBO_OBJS=$(patsubst $(O)/%,$(UBO_O)/%,$(OBJS))
 UBO_OBJS:=$(filter-out $(UBO_O)/i_sound.o $(UBO_O)/i_video.o,$(UBO_OBJS))
 UBO_OBJS+=$(UBO_O)/i_sound_alsa.o $(UBO_O)/i_video_ubo.o $(UBO_O)/doom_api.o
+UBO_OBJS+=$(UBO_O)/ubo_keymap.o $(UBO_O)/ubo_weapon.o
 
 libubodoom.so: $(UBO_OBJS)
 	$(CC) -shared -Wl,-export-dynamic -o $@ $(UBO_OBJS) $(UBO_LIBS)
@@ -109,3 +110,13 @@ $(UBO_O):
 
 $(UBO_O)/%.o: %.c | $(UBO_O)
 	$(CC) $(UBO_CFLAGS) -c $< -o $@
+
+# UBO: pure-logic unit tests -- no engine objects, no zone heap, no IWAD, no
+# device. Links only ubo_keymap.c + ubo_weapon.c with the test runner. Run via
+# `make test-units` here, or native/scripts/run_unit_tests.sh from anywhere.
+UBO_TEST_C=../../../native/test/test_ubo_units.c
+.PHONY: test-units
+test-units: | $(UBO_O)
+	$(CC) $(CFLAGS) -std=gnu89 -I. -o $(UBO_O)/test_ubo_units \
+		$(UBO_TEST_C) ubo_keymap.c ubo_weapon.c
+	$(UBO_O)/test_ubo_units

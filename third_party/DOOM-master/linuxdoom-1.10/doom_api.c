@@ -19,6 +19,8 @@
 #include "i_sound.h"
 #include "i_video.h"
 #include "s_sound.h"
+#include "ubo_keymap.h"
+#include "ubo_weapon.h"
 
 // D_DoomLoop checks advancedemo each iteration; since we drive ticks manually
 // we need to mirror that check ourselves.
@@ -94,21 +96,8 @@ static char* g_argv[16];
 static int g_argc = 0;
 static char g_prog[] = "ubodoom";
 
-static int map_ubo_key(ubo_key_t key)
-{
-    switch (key)
-    {
-        case UBO_KEY_UP: return KEY_UPARROW;
-        case UBO_KEY_DOWN: return KEY_DOWNARROW;
-        case UBO_KEY_LEFT: return KEY_LEFTARROW;
-        case UBO_KEY_RIGHT: return KEY_RIGHTARROW;
-        case UBO_KEY_FIRE: return KEY_RCTRL;
-        case UBO_KEY_USE: return ' ';
-        case UBO_KEY_ESCAPE: return KEY_ESCAPE;
-        case UBO_KEY_MENU_SELECT: return KEY_ENTER;
-        default: return 0;
-    }
-}
+/* map_ubo_key moved to ubo_keymap.c as ubo_map_key() so it can be unit-tested
+   without linking the engine. */
 
 int doom_init(const char* iwad_path)
 {
@@ -314,20 +303,15 @@ void doom_shutdown(void)
 static void ubo_weapon_next(void)
 {
     player_t* p;
-    int cur, i, w;
+    int cur, w;
     if (g_inited != 1)
         return;
     p = &players[consoleplayer];
     cur = (p->pendingweapon != wp_nochange) ? (int)p->pendingweapon : (int)p->readyweapon;
-    for (i = 1; i <= NUMWEAPONS; i++)
-    {
-        w = (cur + i) % NUMWEAPONS;
-        if (p->weaponowned[w])
-        {
-            p->pendingweapon = (weapontype_t)w;
-            break;
-        }
-    }
+    /* boolean is an int-sized enum here, so weaponowned[] aliases int[]. */
+    w = ubo_next_owned_weapon(cur, NUMWEAPONS, (const int*)p->weaponowned);
+    if (p->weaponowned[w])
+        p->pendingweapon = (weapontype_t)w;
 }
 
 void doom_key_down(ubo_key_t key)
@@ -339,7 +323,7 @@ void doom_key_down(ubo_key_t key)
         ubo_weapon_next();
         return;
     }
-    doom_key = map_ubo_key(key);
+    doom_key = ubo_map_key(key);
     fprintf(stderr, "[doom] key_down ubo=%d doom=0x%02x\n", (int)key, doom_key);
     ev.type = ev_keydown;
     ev.data1 = doom_key;
@@ -354,7 +338,7 @@ void doom_key_up(ubo_key_t key)
     event_t ev;
     if (key == UBO_KEY_WEAPON_NEXT)
         return;  /* momentary action, no key-up to post */
-    doom_key = map_ubo_key(key);
+    doom_key = ubo_map_key(key);
     fprintf(stderr, "[doom] key_up   ubo=%d doom=0x%02x\n", (int)key, doom_key);
     ev.type = ev_keyup;
     ev.data1 = doom_key;

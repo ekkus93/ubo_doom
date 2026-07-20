@@ -3,6 +3,8 @@ native/build/
 native/out/
 **/*.o
 **/*.so
+# Vendored Doom build dir (objects, test binaries, linuxxdoom)
+third_party/DOOM-master/linuxdoom-1.10/linux/
 
 # Python
 **/__pycache__/

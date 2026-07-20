@@ -224,7 +224,14 @@ void P_DeathThink (player_t* player)
 	player->damagecount--;
 	
 
-    if (player->cmd.buttons & BT_USE)
+    // UBO: respawn on FIRE or USE, but only once the death view has fully sunk
+    // to the floor (~1s). Vanilla accepts BT_USE only; in the Ubo turn-and-shoot
+    // scheme USE is buried in the DOWN mode-cycle, so a dead player mashing the
+    // action button (FIRE) sees the corpse view sit there and thinks the game
+    // has locked up. The viewheight gate keeps the death view visible instead of
+    // respawning instantly when the player dies with fire held down.
+    if (player->viewheight <= 6*FRACUNIT
+	&& (player->cmd.buttons & (BT_USE | BT_ATTACK)))
 	player->playerstate = PST_REBORN;
 }
 

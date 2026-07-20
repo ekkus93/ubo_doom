@@ -4,6 +4,39 @@
 
 ---
 
+## 2026-07-20T16:04:18 — Death "lockup" root-caused + fixed (respawn on FIRE or USE)
+
+### Diagnosis (proven, not guessed)
+User: "after I die, the game locks up." It is NOT a freeze/hang — it is a
+controls/discoverability problem. Built a death-repro harness
+(`scratchpad/death_repro.c`) that starts a REAL game via `G_DeferedInitNew`
+(re-asserting ga_newgame + `advancedemo=false` each tick so the attract demo
+can't steal gameaction), kills the player with `P_DamageMobj(mo,0,0,10000)`,
+and drives the real key path. Proven:
+- Engine keeps ticking while dead (`doom_is_alive()==1`), still rendering — no hang.
+- Vanilla single-player respawn triggers ONLY on `BT_USE` (`p_user.c` P_DeathThink).
+- In the Ubo turn-and-shoot scheme USE is buried in the DOWN mode-cycle
+  (FIRE→USE→BACK→WEAPON via L1), so a dead player mashing FIRE (the default mode)
+  gets nothing and the corpse view just sits there = feels locked up.
+- Reborn path is fine: single-player G_DoReborn just sets `gameaction=ga_loadlevel`
+  → G_DoLoadLevel (the same path that loads levels normally). The D_Display wipe
+  is already bypassed in library mode; I_GetTime is wall-clock. Nothing blocks.
+
+### Fix (chosen by user: "FIRE or USE, short delay")
+`p_user.c` P_DeathThink: respawn now accepts `BT_USE | BT_ATTACK`, gated on the
+death view having fully sunk (`player->viewheight <= 6*FRACUNIT`, ~1s) so it does
+NOT respawn instantly when the player dies with fire held. Validated by the
+harness: FIRE while sinking stays PST_DEAD; FIRE after sunk → PST_LIVE; USE after
+sunk → PST_LIVE. lint + pytest (33) + C unit tests all green. `.so` rebuilt.
+
+### Status / TODO
+- Native change → needs redeploy (`native/out/libubodoom.so` → device, restart ubo-app).
+- `scratchpad/death_repro.c` is the only test that exercises the real
+  death/respawn path — candidate to promote into `native/test/` as a regression
+  guard (needs an IWAD, like the sanitizers). Not committed yet.
+
+---
+
 ## 2026-07-20T15:45:36 — Added pure-logic C unit tests for the Ubo seams
 
 ### What
